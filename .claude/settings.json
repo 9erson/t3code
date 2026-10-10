@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push *pingdotgg*)",
+      "Bash(git push upstream*)",
+      "Bash(gh pr create *pingdotgg*)",
+      "Bash(gh pr create --repo pingdotgg/*)"
+    ]
+  }
+}
