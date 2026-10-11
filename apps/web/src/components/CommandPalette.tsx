@@ -2,6 +2,8 @@ import { issueEnvironment } from "~/state/issues";
 import { openLinkIssueDialog } from "./issue/LinkIssueDialog";
 ("use client");
 
+import { readIssueListPreferences } from "./issue/issueListPreferences";
+
 import { CircleDotIcon } from "lucide-react";
 
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
@@ -2307,7 +2309,7 @@ function OpenCommandPaletteDialog(props: {
       title: "Open issues",
       icon: <CircleDotIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
-        await navigate({ to: "/issues", search: { state: "open" } });
+        await navigate({ to: "/issues", search: readIssueListPreferences() });
       },
     });
   }

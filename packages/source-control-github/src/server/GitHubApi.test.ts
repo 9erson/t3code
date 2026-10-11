@@ -523,3 +523,41 @@ describe("GitHubCredentials", () => {
     ),
   );
 });
+
+it.effect("admits issue searches against search quota independently of core", () => {
+  const reset = Math.floor(NOW / 1000) + 600;
+  const { layer, requests } = harness((request) =>
+    json(
+      { ok: true },
+      {
+        headers: {
+          "x-ratelimit-resource": request.url.includes("/search/") ? "search" : "core",
+          "x-ratelimit-limit": request.url.includes("/search/") ? "30" : "5000",
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": String(reset),
+        },
+      },
+    ),
+  );
+  return Effect.gen(function* () {
+    yield* TestClock.setTime(NOW);
+    const api = yield* GitHubApi.GitHubApi;
+    yield* api.rest({ host: "github.com", operation: "listIssues", path: "repos/acme/web/issues" });
+    yield* api.rest({
+      host: "github.com",
+      operation: "searchIssues",
+      path: "search/issues?q=is:issue",
+    });
+    const failure = yield* Effect.flip(
+      api.rest({ host: "github.com", operation: "searchIssues", path: "search/issues?q=is:issue" }),
+    );
+    expect(failure).toMatchObject({
+      _tag: "SourceControlRateLimitPausedError",
+      retryAt: reset * 1000,
+    });
+    expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+      "/repos/acme/web/issues",
+      "/search/issues",
+    ]);
+  }).pipe(Effect.provide(layer));
+});

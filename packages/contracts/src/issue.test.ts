@@ -62,3 +62,21 @@ it("round-trips issue details with empty descriptions and comment authors", () =
   ).toThrow();
   expect(() => decodeRef({ host: "github.com", repository: "acme/web", number: 42 })).toThrow();
 });
+
+it("round-trips closed scope, qualifier search, filters and sorts while bounding query and cursors", () => {
+  const input = {
+    state: "closed",
+    query: 'label:"needs review" author:octocat is:open',
+    filters: { labels: ["bug"], author: "octocat" },
+    sort: "comments",
+    cursors: { "github.com acme/web": "2:3" },
+  };
+  expect(decode(input)).toEqual(input);
+  for (const invalid of [
+    { query: "x".repeat(257) },
+    { sort: "random" },
+    { filters: { labels: Array(11).fill("bug") } },
+    { cursors: { "github.com acme/web": "x".repeat(4097) } },
+  ])
+    expect(() => decode({ state: "open", ...invalid })).toThrow();
+});

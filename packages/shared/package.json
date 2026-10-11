@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./issueSearch": {
+      "types": "./src/issueSearch.ts",
+      "import": "./src/issueSearch.ts"
+    },
     "./authScopeOptions": {
       "types": "./src/authScopeOptions.ts",
       "import": "./src/authScopeOptions.ts"
