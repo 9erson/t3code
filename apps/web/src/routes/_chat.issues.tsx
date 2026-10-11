@@ -42,6 +42,7 @@ import { PullRequestSearchInput } from "../components/pullRequest/PullRequestLis
 import { CreateIssueControl } from "../components/issue/CreateIssueControl";
 import { issueCreationTargets } from "../components/issue/issueComposer.logic";
 import { useProjects } from "../state/entities";
+import { useWorkOnIssue } from "../components/issue/useWorkOnIssue";
 
 const IssueDetailPanel = lazy(() =>
   import("../components/issue/IssueDetailPanel").then((module) => ({
@@ -58,6 +59,7 @@ export const Route = createFileRoute("/_chat/issues")({
 });
 
 function IssuesPage() {
+  const issueWork = useWorkOnIssue();
   const search = Route.useSearch();
   const { state } = search;
   const selection = issueSelectionFromSearch(search);
@@ -375,78 +377,100 @@ function IssuesPage() {
                   {group.entries.map((entry) => {
                     const Icon = entry.state === "open" ? CircleDotIcon : CircleCheckIcon;
                     return (
-                      <a
-                        key={`${entry.host.toLowerCase()}:${entry.repository.toLowerCase()}:${entry.number}`}
-                        href={entry.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-current={
-                          selection?.environmentId === entry.environmentId &&
-                          selection.projectId === entry.projectId &&
-                          selection.host === entry.host &&
-                          selection.repository === entry.repository &&
-                          selection.number === entry.number
-                            ? "true"
-                            : undefined
-                        }
-                        onClick={(event) => {
-                          event.preventDefault();
-                          if (event.metaKey || event.ctrlKey) {
-                            void openIssueOnGitHub(entry.url);
-                            return;
-                          }
-                          void navigate({
-                            search: (previous) => ({ ...previous, ...issueSelectionSearch(entry) }),
-                          });
-                        }}
-                        className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-md px-3 py-2.5 hover:bg-accent aria-[current=true]:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                      <div
+                        key={`${entry.environmentId}:${entry.projectId}:${entry.host.toLowerCase()}:${entry.repository.toLowerCase()}:${entry.number}`}
+                        className="flex items-center gap-2"
                       >
-                        <Icon
-                          aria-label={entry.state}
-                          className={`mt-0.5 size-4 ${entry.state === "open" ? "text-success" : "text-primary"}`}
-                        />
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{entry.title}</p>
-                          <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                            {entry.host} · {entry.repository}{" "}
-                            <span
-                              onContextMenu={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                void showPullRequestLinkContextMenu({
-                                  url: entry.url,
-                                  openLabel: "Open on GitHub",
-                                  position: { x: event.clientX, y: event.clientY },
-                                });
-                              }}
-                            >
-                              #{entry.number}
-                            </span>{" "}
-                            · {entry.author?.login ?? "Unknown author"}
-                          </p>
-                          {entry.labels.length > 0 ? (
-                            <div className="mt-1 flex flex-wrap gap-1">
-                              {entry.labels.map((label) => (
-                                <PullRequestLabelChip key={label.name} label={label} />
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                        <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
-                          <time dateTime={entry.updatedAt}>
-                            {formatRelativeTimeLabel(entry.updatedAt)}
-                          </time>
-                          {entry.commentCount > 0 ? (
-                            <span
-                              className="flex items-center gap-1"
-                              aria-label={`${entry.commentCount} comments`}
-                            >
-                              <MessageSquareIcon aria-hidden className="size-3" />
-                              {entry.commentCount}
-                            </span>
-                          ) : null}
-                        </div>
-                      </a>
+                        <a
+                          href={entry.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-current={
+                            selection?.environmentId === entry.environmentId &&
+                            selection.projectId === entry.projectId &&
+                            selection.host === entry.host &&
+                            selection.repository === entry.repository &&
+                            selection.number === entry.number
+                              ? "true"
+                              : undefined
+                          }
+                          onClick={(event) => {
+                            event.preventDefault();
+                            if (event.metaKey || event.ctrlKey) {
+                              void openIssueOnGitHub(entry.url);
+                              return;
+                            }
+                            void navigate({
+                              search: (previous) => ({
+                                ...previous,
+                                ...issueSelectionSearch(entry),
+                              }),
+                            });
+                          }}
+                          className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 rounded-md px-3 py-2.5 hover:bg-accent aria-[current=true]:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                        >
+                          <Icon
+                            aria-label={entry.state}
+                            className={`mt-0.5 size-4 ${entry.state === "open" ? "text-success" : "text-primary"}`}
+                          />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{entry.title}</p>
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                              {entry.host} · {entry.repository}{" "}
+                              <span
+                                onContextMenu={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  void showPullRequestLinkContextMenu({
+                                    url: entry.url,
+                                    openLabel: "Open on GitHub",
+                                    position: { x: event.clientX, y: event.clientY },
+                                  });
+                                }}
+                              >
+                                #{entry.number}
+                              </span>{" "}
+                              · {entry.author?.login ?? "Unknown author"}
+                            </p>
+                            {entry.labels.length > 0 ? (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {entry.labels.map((label) => (
+                                  <PullRequestLabelChip key={label.name} label={label} />
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
+                            <time dateTime={entry.updatedAt}>
+                              {formatRelativeTimeLabel(entry.updatedAt)}
+                            </time>
+                            {entry.commentCount > 0 ? (
+                              <span
+                                className="flex items-center gap-1"
+                                aria-label={`${entry.commentCount} comments`}
+                              >
+                                <MessageSquareIcon aria-hidden className="size-3" />
+                                {entry.commentCount}
+                              </span>
+                            ) : null}
+                          </div>
+                        </a>
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          aria-label={`Work on issue #${entry.number}: ${entry.title}`}
+                          disabled={issueWork.pending !== null || !issueWork.available(entry)}
+                          onClick={() => void issueWork.workOnIssue(entry)}
+                        >
+                          {issueWork.pending?.environmentId === entry.environmentId &&
+                          issueWork.pending.projectId === entry.projectId &&
+                          issueWork.pending.host === entry.host &&
+                          issueWork.pending.repository === entry.repository &&
+                          issueWork.pending.number === entry.number
+                            ? "Preparing…"
+                            : "Work on this"}
+                        </Button>
+                      </div>
                     );
                   })}
                 </section>
