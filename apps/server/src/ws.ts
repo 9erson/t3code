@@ -224,6 +224,7 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as IssueService from "./issue/IssueService.ts";
+import * as ThreadIssueService from "./issue/ThreadIssueService.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
@@ -1225,6 +1226,7 @@ const layerWsRpc = (
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
       const secretRequests = yield* SecretRequests.SecretRequests;
       const issues = yield* IssueService.IssueService;
+      const threadIssues = yield* ThreadIssueService.make;
       const pullRequests = yield* PullRequestService.PullRequestService;
       const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const deviceService = yield* DeviceService.DeviceService;
@@ -2462,6 +2464,10 @@ const layerWsRpc = (
                 Effect.forkScoped,
               ),
           ),
+        [WS_METHODS.issuesLink]: (input) => threadIssues.link(input),
+        [WS_METHODS.issuesUnlink]: (input) => threadIssues.unlink(input),
+        [WS_METHODS.issuesSummary]: (input) => threadIssues.summary(input),
+        [WS_METHODS.issuesLinkedThreads]: (input) => threadIssues.linkedThreads(input),
         [WS_METHODS.issuesList]: (input) => issues.list(input),
         [WS_METHODS.issuesInvalidate]: () => issues.invalidate(),
         [WS_METHODS.issuesSubscribeRefreshes]: () => issues.subscribeRefreshes,

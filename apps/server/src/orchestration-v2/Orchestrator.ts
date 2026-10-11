@@ -1,3 +1,4 @@
+import { normalizeThreadIssueKey, threadIssueKeysEqual } from "@t3tools/contracts";
 import type {
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -446,6 +447,9 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.visit":
     case "thread.mark-unread":
     case "thread.metadata.update":
+    case "thread.issue.link":
+    case "thread.issue.unlink":
+    case "thread.issue.sync":
     case "thread.pull-request.link":
     case "thread.pull-request.unlink":
     case "thread.pull-request-link.sync":
@@ -2385,6 +2389,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.active.reorder"
           | "thread.mark-unread"
           | "thread.metadata.update"
+          | "thread.issue.link"
+          | "thread.issue.unlink"
+          | "thread.issue.sync"
           | "thread.pull-request.link"
           | "thread.pull-request.unlink"
           | "thread.pull-request-link.sync"
@@ -2979,6 +2986,36 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: now,
           };
         }
+        case "thread.issue.link":
+        case "thread.issue.unlink":
+        case "thread.issue.sync": {
+          const key = normalizeThreadIssueKey(command);
+          const links = thread.issues ?? [];
+          const existing = links.find((link) => threadIssueKeysEqual(link, key));
+          if (command.type !== "thread.issue.link" && !existing) return thread;
+          if (command.type === "thread.issue.link" && existing) return thread;
+          const issues =
+            command.type === "thread.issue.unlink"
+              ? links.filter((link) => !threadIssueKeysEqual(link, key))
+              : command.type === "thread.issue.sync"
+                ? links.map((link) =>
+                    link === existing ? { ...link, snapshot: command.snapshot } : link,
+                  )
+                : [
+                    ...links,
+                    {
+                      ...key,
+                      url: command.url,
+                      snapshot: command.snapshot,
+                      linkedAt: DateTime.formatIso(now),
+                    },
+                  ];
+          return {
+            ...thread,
+            issues,
+            updatedAt: command.type === "thread.issue.sync" ? thread.updatedAt : now,
+          };
+        }
         case "thread.pull-request.link":
         case "thread.pull-request.unlink":
         case "thread.pull-request-link.sync": {
@@ -3184,6 +3221,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           };
       }
     })();
+    if (
+      (command.type === "thread.issue.link" ||
+        command.type === "thread.issue.unlink" ||
+        command.type === "thread.issue.sync") &&
+      updatedThread === thread
+    )
+      return;
     const eventType = (() => {
       switch (command.type) {
         case "thread.archive":
@@ -3213,6 +3257,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         case "thread.metadata.update":
         case "thread.title.regeneration.complete":
           return "thread.metadata-updated" as const;
+        case "thread.issue.link":
+        case "thread.issue.unlink":
+        case "thread.issue.sync":
+          return "thread.issues-updated" as const;
         case "thread.pull-request.link":
         case "thread.pull-request.unlink":
         case "thread.pull-request-link.sync":
@@ -10456,6 +10504,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.active.reorder":
       case "thread.mark-unread":
       case "thread.metadata.update":
+      case "thread.issue.link":
+      case "thread.issue.unlink":
+      case "thread.issue.sync":
       case "thread.pull-request.link":
       case "thread.pull-request.unlink":
       case "thread.pull-request-link.sync":
@@ -10726,10 +10777,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       Effect.flatMap((planned) =>
         // A settle that finds the provider already ended everything, or a
         // stop that finds nothing running, has nothing to record. That is
-        // its expected outcome, not a failure.
+        // its expected outcome, not a failure. Issue mutations are likewise
+        // idempotent when the link is already present or absent.
         planned.events.length > 0 ||
         command.type === "thread.background-work.settle" ||
-        command.type === "thread.stop"
+        command.type === "thread.stop" ||
+        command.type === "thread.issue.link" ||
+        command.type === "thread.issue.unlink" ||
+        command.type === "thread.issue.sync"
           ? Effect.succeed(planned)
           : Effect.fail(
               new OrchestratorDispatchError({

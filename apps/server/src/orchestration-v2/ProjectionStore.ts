@@ -1,3 +1,4 @@
+import { ThreadIssueSnapshot } from "@t3tools/contracts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
 import { makeThreadFind, findProjectedThreadItems } from "./ThreadFind.ts";
@@ -721,6 +722,7 @@ export function applyToProjection(
     case "thread.pin-reordered":
     case "thread.active-reordered":
     case "thread.metadata-updated":
+    case "thread.issues-updated":
     case "thread.pull-request-synced":
     case "thread.runtime-mode-updated":
     case "thread.interaction-mode-updated":
@@ -1016,6 +1018,8 @@ const encodeTimelineSources = Schema.encodeEffect(
   ),
 );
 const encodeIdList = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)));
+
+const encodeIssueSnapshot = Schema.encodeSync(Schema.fromJsonString(ThreadIssueSnapshot));
 
 const encodeThreadPayload = Schema.encodeEffect(
   Schema.fromJsonString(OrchestrationV2AppThreadJsonSchema),
@@ -1460,6 +1464,7 @@ export function threadShellFromProjection(
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
     pullRequests: threadPullRequestsOf(projection.thread),
+    issues: projection.thread.issues ?? [],
     ...(projection.thread.linkedPullRequest === undefined
       ? {}
       : { linkedPullRequest: projection.thread.linkedPullRequest }),
@@ -1728,6 +1733,7 @@ function shellFromState(input: {
     branch: input.state.thread.branch,
     worktreePath: input.state.thread.worktreePath,
     pullRequests: threadPullRequestsOf(input.state.thread),
+    issues: input.state.thread.issues ?? [],
     ...(input.state.thread.linkedPullRequest === undefined
       ? {}
       : { linkedPullRequest: input.state.thread.linkedPullRequest }),
@@ -1828,6 +1834,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           case "thread.visited":
           case "thread.marked-unread":
           case "thread.metadata-updated":
+          case "thread.issues-updated":
           case "thread.pull-request-synced":
           case "thread.runtime-mode-updated":
           case "thread.interaction-mode-updated":
@@ -1881,6 +1888,21 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 deleted_at = excluded.deleted_at,
                 payload_json = excluded.payload_json
             `;
+            if (
+              event.type === "thread.issues-updated" ||
+              event.type === "thread.created" ||
+              event.type === "thread.deleted"
+            ) {
+              yield* sql`DELETE FROM orchestration_v2_projection_thread_issues WHERE thread_id = ${event.threadId}`;
+              if (event.payload.deletedAt === null) {
+                for (const link of event.payload.issues ?? []) {
+                  yield* sql`INSERT INTO orchestration_v2_projection_thread_issues
+                    (thread_id, host, repository, number, url, linked_at, snapshot_json)
+                    VALUES (${event.threadId}, ${link.host}, ${link.repository}, ${link.number},
+                      ${link.url}, ${link.linkedAt}, ${encodeIssueSnapshot(link.snapshot)})`;
+                }
+              }
+            }
             break;
           }
           case "run.created":

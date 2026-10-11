@@ -16,6 +16,12 @@ export interface IssueProviderApi {
     readonly host: string;
     readonly cwd: string;
   }) => Effect.Effect<string, IssueOperationError>;
+  readonly getIssue: (input: {
+    readonly host: string;
+    readonly cwd: string;
+    readonly repository: string;
+    readonly number: number;
+  }) => Effect.Effect<ProviderIssue, IssueOperationError>;
   readonly listIssues: (input: {
     readonly host: string;
     readonly cwd: string;

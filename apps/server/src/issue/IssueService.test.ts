@@ -43,6 +43,7 @@ const projects = [
 ];
 const provider: IssueProviderApi = {
   kind: "github",
+  getIssue: () => Effect.die("List tests do not read individual issues"),
   getViewer: ({ host }) =>
     host === "ghe.example"
       ? Effect.fail(new IssueOperationError({ host, reason: "credentials-missing" }))
@@ -198,4 +199,38 @@ it.effect("refines stored unknown hosts through the git-remote resolver", () =>
     expect(answer.entries.map((row) => row.projectId)).toEqual(["enterprise"]);
     expect(answer.providers[0]?.kind).toBe("github");
   }),
+);
+
+it.effect(
+  "refreshes a linked issue's current state after invalidation without depending on open-list membership",
+  () =>
+    Effect.gen(function* () {
+      let state: "open" | "closed" = "open";
+      const service = yield* make([project("healthy", "github.com")], {
+        ...provider,
+        getIssue: () =>
+          Effect.succeed({
+            number: 5,
+            title: "Linked bug",
+            url: "https://github.com/acme/healthy/issues/5",
+            author: null,
+            labels: [],
+            assignees: [],
+            commentCount: 0,
+            state,
+            createdAt: "2026-07-01T00:00:00Z",
+            updatedAt: "2026-07-02T00:00:00Z",
+          }),
+      });
+      const key = { host: "GITHUB.COM", repository: "Acme/Healthy", number: 5 };
+      expect((yield* service.summary(key)).state).toBe("open");
+      state = "closed";
+      yield* service.invalidate();
+      expect(yield* service.summary(key)).toMatchObject({
+        host: "github.com",
+        repository: "acme/healthy",
+        number: 5,
+        state: "closed",
+      });
+    }),
 );

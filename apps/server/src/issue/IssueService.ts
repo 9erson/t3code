@@ -2,6 +2,9 @@ import {
   IssueOperationError,
   type IssueListInput,
   type IssueListResult,
+  type IssueListEntry,
+  ThreadIssueKey,
+  normalizeThreadIssueKey,
   type SourceControlProviderKind,
   pullRequestHostOf,
 } from "@t3tools/contracts";
@@ -16,15 +19,23 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
+import * as Schema from "effect/Schema";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as IssueReadCache from "./IssueReadCache.ts";
 import * as IssueProviderRegistry from "./IssueProviderRegistry.ts";
 
+const summaryKey = Schema.fromJsonString(Schema.Tuple([Schema.Number, ThreadIssueKey]));
+const encodeSummaryKey = Schema.encodeSync(summaryKey);
+const decodeSummaryKey = Schema.decodeSync(summaryKey);
+
+const isIssueOperationError = Schema.is(IssueOperationError);
+
 export class IssueService extends Context.Service<
   IssueService,
   {
+    readonly summary: (input: ThreadIssueKey) => Effect.Effect<IssueListEntry, IssueOperationError>;
     readonly list: (input: IssueListInput) => Effect.Effect<IssueListResult, IssueOperationError>;
     readonly invalidate: () => Effect.Effect<void>;
     readonly subscribeRefreshes: Stream.Stream<number>;
@@ -227,7 +238,57 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.seconds(30) : Duration.zero),
     },
   );
+  const summary = Effect.fn("IssueService.summary")(
+    function* (input: ThreadIssueKey) {
+      const key = normalizeThreadIssueKey(input);
+      const rows = yield* projects.listShells();
+      for (const project of rows) {
+        const identity =
+          project.repositoryIdentity == null || project.repositoryIdentity.provider === "unknown"
+            ? ((yield* identities.resolve(project.workspaceRoot)) ??
+              project.repositoryIdentity ??
+              null)
+            : project.repositoryIdentity;
+        const repository = sourceControlRepositorySelector(identity);
+        if (
+          identity == null ||
+          repository?.toLowerCase() !== key.repository ||
+          pullRequestHostOf(identity, "github") !== key.host
+        )
+          continue;
+        if (identity.provider !== "github")
+          return yield* new IssueOperationError({ host: key.host, reason: "provider-unsupported" });
+        const provider = registry.get("github");
+        if (provider === null)
+          return yield* new IssueOperationError({ host: key.host, reason: "provider-unsupported" });
+        const issue = yield* provider.getIssue({ ...key, cwd: project.workspaceRoot });
+        return {
+          ...issue,
+          ...key,
+          provider: "github" as const,
+          projectId: project.id,
+          projectTitle: project.title,
+        };
+      }
+      return yield* new IssueOperationError({ host: key.host, reason: "repository-unavailable" });
+    },
+    (effect, input) =>
+      effect.pipe(
+        Effect.mapError((cause) =>
+          isIssueOperationError(cause)
+            ? cause
+            : new IssueOperationError({ host: input.host, reason: "transient", cause }),
+        ),
+      ),
+  );
+
+  const summaries = yield* Cache.makeWith((key: string) => summary(decodeSummaryKey(key)[1]), {
+    capacity: 128,
+    timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.seconds(30) : Duration.zero),
+  });
   return IssueService.of({
+    summary: (input) =>
+      Cache.get(summaries, encodeSummaryKey([epoch, normalizeThreadIssueKey(input)])),
     list: (input) =>
       Cache.get(
         cache,
@@ -251,6 +312,7 @@ export const make = Effect.gen(function* () {
       yield* readCache.invalidate;
       epoch += 1;
       yield* Cache.invalidateAll(cache);
+      yield* Cache.invalidateAll(summaries);
       yield* SubscriptionRef.update(refreshes, (value) => value + 1);
     }),
     subscribeRefreshes: SubscriptionRef.changes(refreshes),

@@ -23,6 +23,8 @@ import {
   ChatGptHandoffState,
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
+import { IssueLinkInput, IssueLinkedThreadsResult, ThreadIssueKey } from "./threadIssue.ts";
+import { IssueListEntry } from "./issue.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
@@ -522,6 +524,10 @@ export const WS_METHODS = {
 
   // Pull request methods
   issuesList: "issues.list",
+  issuesLink: "issues.link",
+  issuesUnlink: "issues.unlink",
+  issuesSummary: "issues.summary",
+  issuesLinkedThreads: "issues.linkedThreads",
   issuesInvalidate: "issues.invalidate",
   issuesSubscribeRefreshes: "issues.subscribeRefreshes",
   pullRequestsList: "pullRequests.list",
@@ -939,6 +945,26 @@ const WsServerGetBackgroundPolicyRpc = Rpc.make(WS_METHODS.serverGetBackgroundPo
 });
 
 const IssueRpcError = Schema.Union([IssueOperationError, EnvironmentAuthorizationError]);
+const WsIssuesLinkRpc = Rpc.make(WS_METHODS.issuesLink, {
+  payload: IssueLinkInput,
+  success: Schema.Void,
+  error: IssueRpcError,
+});
+const WsIssuesUnlinkRpc = Rpc.make(WS_METHODS.issuesUnlink, {
+  payload: IssueLinkInput,
+  success: Schema.Void,
+  error: IssueRpcError,
+});
+const WsIssuesSummaryRpc = Rpc.make(WS_METHODS.issuesSummary, {
+  payload: ThreadIssueKey,
+  success: IssueListEntry,
+  error: IssueRpcError,
+});
+const WsIssuesLinkedThreadsRpc = Rpc.make(WS_METHODS.issuesLinkedThreads, {
+  payload: ThreadIssueKey,
+  success: IssueLinkedThreadsResult,
+  error: IssueRpcError,
+});
 const WsIssuesListRpc = Rpc.make(WS_METHODS.issuesList, {
   payload: IssueListInput,
   success: IssueListResult,
@@ -1922,6 +1948,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetBackgroundPolicyRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
+  WsIssuesLinkRpc,
+  WsIssuesUnlinkRpc,
+  WsIssuesSummaryRpc,
+  WsIssuesLinkedThreadsRpc,
   WsIssuesListRpc,
   WsIssuesInvalidateRpc,
   WsIssuesSubscribeRefreshesRpc,

@@ -66,3 +66,4 @@ export * from "./secretRequest.ts";
 export * from "./clientRpcPermissions.ts";
 
 export * from "./issue.ts";
+export * from "./threadIssue.ts";

@@ -203,6 +203,12 @@ Each environment uses its own GitHub account. A host that cannot be read shows r
 while healthy projects still appear. Projects without a remote are excluded; other forges are not
 supported yet.
 
+To associate existing work with an issue, use **Link issue to thread** in the command palette, or
+open **Linked issues** from the thread’s panel menu. Find an issue by title, paste its GitHub URL,
+or enter its number from the thread’s repository. Linked issues stay with the thread across
+restarts. Open a thread’s issue chip to review its links and current states; use **Unlink** in
+that panel to detach one. Linking and unlinking require source control write permission.
+
 ## Troubleshooting
 
 - **Not authenticated:** run the provider's login command on the server, then rescan. For Bitbucket,

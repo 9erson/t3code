@@ -83,6 +83,7 @@ export const IssueFailureReason = Schema.Literals([
   "provider-unsupported",
   "transient",
   "invalid-response",
+  "repository-unavailable",
 ]);
 export class IssueOperationError extends Schema.TaggedError<IssueOperationError>()(
   "IssueOperationError",
@@ -105,6 +106,8 @@ export class IssueOperationError extends Schema.TaggedError<IssueOperationError>
         return `GitHub rate limit reached for ${this.host}. Wait until the limit resets and refresh.`;
       case "provider-unsupported":
         return "This host cannot be browsed here yet.";
+      case "repository-unavailable":
+        return `No configured GitHub project can read issues from ${this.host}. Add the repository as a project and retry.`;
       case "invalid-response":
         return `GitHub returned an unreadable issues response for ${this.host}. Refresh to retry.`;
       case "transient":

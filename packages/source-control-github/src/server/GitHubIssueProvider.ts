@@ -61,6 +61,19 @@ const failure = (error: GitHubApi.GitHubApiError) =>
     cause: error,
   });
 
+const toIssue = (row: typeof Row.Type): ProviderIssue => ({
+  number: row.number,
+  title: row.title,
+  url: row.html_url,
+  author: row.user === null ? null : actor(row.user),
+  state: row.state,
+  labels: row.labels.map((label) => ({ name: label.name, color: label.color ?? null })),
+  assignees: row.assignees.map(actor),
+  commentCount: row.comments,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
 export const make = Effect.gen(function* () {
   const api = yield* GitHubApi.GitHubApi;
   const read = <S extends Schema.Top>(host: string, path: string, schema: S) =>
@@ -96,6 +109,13 @@ export const make = Effect.gen(function* () {
           Cache.get(viewers, JSON.stringify([host, fingerprint])),
         ),
       ),
+    getIssue: Effect.fn("GitHubIssueProvider.getIssue")(function* (input) {
+      const repository = input.repository.split("/").map(encodeURIComponent).join("/");
+      const { value } = yield* read(input.host, `repos/${repository}/issues/${input.number}`, Row);
+      if (value.pull_request !== undefined)
+        return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
+      return toIssue(value);
+    }),
     listIssues: Effect.fn("GitHubIssueProvider.listIssues")(function* (input) {
       // REST's issues endpoint also returns PRs. Follow its pages, filtering them before the
       // issue limit, so a page of PRs does not hide issues waiting on a subsequent page.
@@ -129,18 +149,7 @@ export const make = Effect.gen(function* () {
         for (let index = offset; index < value.length; index += 1) {
           const row = value[index]!;
           if (row.pull_request !== undefined) continue;
-          items.push({
-            number: row.number,
-            title: row.title,
-            url: row.html_url,
-            author: row.user === null ? null : actor(row.user),
-            state: row.state,
-            labels: row.labels.map((label) => ({ name: label.name, color: label.color ?? null })),
-            assignees: row.assignees.map(actor),
-            commentCount: row.comments,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-          });
+          items.push(toIssue(row));
           if (items.length === input.limit)
             return {
               items,

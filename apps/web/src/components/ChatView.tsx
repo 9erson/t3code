@@ -285,6 +285,8 @@ import { PullRequestDetailPanel } from "./pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
 import { RightPanelTabs } from "./RightPanelTabs";
+import { LinkIssueDialogHost } from "./issue/LinkIssueDialog";
+import { ThreadIssuesPanel } from "./issue/ThreadIssuesPanel";
 import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
 import { ThreadPullRequestsPanel } from "./pullRequest/ThreadPullRequestsPanel";
 import { useDeviceState } from "~/state/device";
@@ -11103,6 +11105,8 @@ export default function ChatView(props: ChatViewProps) {
             : undefined
         }
       />
+    ) : renderedRightPanelSurface?.kind === "issues" && activeThreadRef ? (
+      <ThreadIssuesPanel threadRef={activeThreadRef} />
     ) : renderedRightPanelSurface?.kind === "pull-requests" && activeThreadRef ? (
       <ThreadPullRequestsPanel threadRef={activeThreadRef} />
     ) : renderedRightPanelSurface?.kind === "device" ? (
@@ -12007,6 +12011,10 @@ export default function ChatView(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
+          onAddIssues={() => {
+            if (activeThreadRef) useRightPanelStore.getState().open(activeThreadRef, "issues");
+          }}
+          issuesAvailable={serverConfig?.environment.capabilities.issues === true}
           onAddDevice={addDeviceSurface}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
@@ -12066,6 +12074,10 @@ export default function ChatView(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
+            onAddIssues={() => {
+              if (activeThreadRef) useRightPanelStore.getState().open(activeThreadRef, "issues");
+            }}
+            issuesAvailable={serverConfig?.environment.capabilities.issues === true}
             onAddDevice={addDeviceSurface}
             browserAvailable={canOperatePreview && browserAvailable}
             terminalAvailable={activeProject !== null && canOperateTerminal}
@@ -12119,6 +12131,7 @@ export default function ChatView(props: ChatViewProps) {
         </AlertDialogPopup>
       </AlertDialog>
       <LinkPullRequestDialogHost />
+      <LinkIssueDialogHost />
       {expandedImage && (
         <ExpandedImageDialog
           key={expandedImageKey(expandedImage)}
