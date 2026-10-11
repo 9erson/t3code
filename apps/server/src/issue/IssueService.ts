@@ -1,5 +1,7 @@
 import {
   IssueOperationError,
+  type IssueDetail,
+  IssueRef,
   type IssueListInput,
   type IssueListResult,
   type SourceControlProviderKind,
@@ -14,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -22,9 +25,14 @@ import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolv
 import * as IssueReadCache from "./IssueReadCache.ts";
 import * as IssueProviderRegistry from "./IssueProviderRegistry.ts";
 
+const detailKeyCodec = Schema.fromJsonString(IssueRef);
+const encodeDetailKey = Schema.encodeSync(detailKeyCodec);
+const decodeDetailKey = Schema.decodeSync(detailKeyCodec);
+
 export class IssueService extends Context.Service<
   IssueService,
   {
+    readonly detail: (input: IssueRef) => Effect.Effect<IssueDetail, IssueOperationError>;
     readonly list: (input: IssueListInput) => Effect.Effect<IssueListResult, IssueOperationError>;
     readonly invalidate: () => Effect.Effect<void>;
     readonly subscribeRefreshes: Stream.Stream<number>;
@@ -227,7 +235,68 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.seconds(30) : Duration.zero),
     },
   );
+  const details = yield* Cache.makeWith(
+    Effect.fn("IssueService.detail")(function* (key: string) {
+      const input = decodeDetailKey(key);
+      const shell = yield* projects
+        .getShell(input.projectId)
+        .pipe(
+          Effect.mapError(
+            (cause) => new IssueOperationError({ host: input.host, reason: "transient", cause }),
+          ),
+        );
+      if (Option.isNone(shell))
+        return yield* new IssueOperationError({ host: input.host, reason: "not-found" });
+      const project = shell.value;
+      const identity =
+        project.repositoryIdentity == null || project.repositoryIdentity.provider === "unknown"
+          ? yield* identities.resolve(project.workspaceRoot)
+          : project.repositoryIdentity;
+      const repository = sourceControlRepositorySelector(identity);
+      const kind = (identity?.provider ?? "unknown") as SourceControlProviderKind;
+      const host = pullRequestHostOf(identity, kind);
+      if (
+        repository === null ||
+        repository.toLowerCase() !== input.repository.toLowerCase() ||
+        host !== input.host.toLowerCase()
+      )
+        return yield* new IssueOperationError({ host: input.host, reason: "not-found" });
+      const api = registry.get(kind);
+      if (api === null)
+        return yield* new IssueOperationError({ host, reason: "provider-unsupported" });
+      const detail = yield* api.getIssue({
+        host,
+        repository,
+        number: input.number,
+        cwd: project.workspaceRoot,
+      });
+      return {
+        ...detail,
+        provider: kind,
+        host,
+        projectId: project.id,
+        projectTitle: project.title,
+        workspaceRoot: project.workspaceRoot,
+        repository,
+        observedAt: yield* Clock.currentTimeMillis,
+      };
+    }),
+    {
+      capacity: 128,
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.seconds(60) : Duration.zero),
+    },
+  );
   return IssueService.of({
+    detail: (input) =>
+      Cache.get(
+        details,
+        encodeDetailKey({
+          projectId: input.projectId,
+          host: input.host.toLowerCase(),
+          repository: input.repository.toLowerCase(),
+          number: input.number,
+        }),
+      ),
     list: (input) =>
       Cache.get(
         cache,
@@ -251,6 +320,7 @@ export const make = Effect.gen(function* () {
       yield* readCache.invalidate;
       epoch += 1;
       yield* Cache.invalidateAll(cache);
+      yield* Cache.invalidateAll(details);
       yield* SubscriptionRef.update(refreshes, (value) => value + 1);
     }),
     subscribeRefreshes: SubscriptionRef.changes(refreshes),

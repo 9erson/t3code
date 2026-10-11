@@ -23,6 +23,13 @@ export function createIssueEnvironmentAtoms<R, E>(
       refreshIntervalMs: 60_000,
       refreshTrigger: ({ environmentId }) => refreshes({ environmentId, input: {} }),
     }),
+    detail: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:issues:detail",
+      tag: WS_METHODS.issuesDetail,
+      staleTimeMs: 60_000,
+      refreshIntervalMs: 60_000,
+      refreshTrigger: ({ environmentId }) => refreshes({ environmentId, input: {} }),
+    }),
     invalidate: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:issues:invalidate",
       tag: WS_METHODS.issuesInvalidate,

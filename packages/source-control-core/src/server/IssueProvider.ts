@@ -1,4 +1,5 @@
 import type {
+  IssueDetail,
   IssueListEntry,
   IssueListState,
   IssueOperationError,
@@ -10,7 +11,15 @@ export type ProviderIssue = Omit<
   IssueListEntry,
   "provider" | "host" | "projectId" | "projectTitle" | "repository" | "observedAt"
 >;
+export type ProviderIssueDetail = ProviderIssue &
+  Pick<IssueDetail, "body" | "comments" | "commentsTruncated">;
 export interface IssueProviderApi {
+  readonly getIssue: (input: {
+    readonly host: string;
+    readonly cwd: string;
+    readonly repository: string;
+    readonly number: number;
+  }) => Effect.Effect<ProviderIssueDetail, IssueOperationError>;
   readonly kind: SourceControlProviderKind;
   readonly getViewer: (input: {
     readonly host: string;
