@@ -1,3 +1,4 @@
+import { readIssueListPreferences } from "../issue/issueListPreferences";
 import { ArrowLeftIcon, CircleDotIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
@@ -231,7 +232,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               label="Issues"
               onClick={() => {
                 closeMobileSidebar();
-                void navigate({ to: "/issues", search: { state: "open" } });
+                void navigate({ to: "/issues", search: readIssueListPreferences() });
               }}
             />
           ) : null}

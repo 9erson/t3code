@@ -133,6 +133,9 @@ export const make = Effect.gen(function* () {
                 cwd: project.workspaceRoot,
                 repository,
                 state: input.state,
+                ...(input.query === undefined ? {} : { query: input.query }),
+                ...(input.filters === undefined ? {} : { filters: input.filters }),
+                ...(input.sort === undefined ? {} : { sort: input.sort }),
                 limit: input.limit ?? 100,
                 ...(cursor === undefined ? {} : { cursor }),
               })
@@ -167,6 +170,13 @@ export const make = Effect.gen(function* () {
       if (error !== null) {
         if (error.reason !== "provider-unsupported") {
           failures.push(error);
+          for (const { repository } of bucket.projects) {
+            const key = `${host} ${repository.toLowerCase()}`;
+            if (input.cursors === undefined || input.cursors[key] !== undefined) {
+              result.truncated = true;
+              result.nextCursors = { ...result.nextCursors, [key]: input.cursors?.[key] ?? "1:0" };
+            }
+          }
           result.errors = [
             ...result.errors,
             ...bucket.projects.map(({ project }) => ({
@@ -182,6 +192,9 @@ export const make = Effect.gen(function* () {
       for (const { project, repository, observedAt, page } of pages) {
         if (Result.isFailure(page)) {
           failures.push(page.failure);
+          result.truncated = true;
+          const key = `${host} ${repository.toLowerCase()}`;
+          result.nextCursors = { ...result.nextCursors, [key]: input.cursors?.[key] ?? "1:0" };
           result.errors = [
             ...result.errors,
             { projectId: project.id, projectTitle: project.title, message: page.failure.message },
@@ -304,6 +317,9 @@ export const make = Effect.gen(function* () {
           epoch,
           input: {
             state: input.state,
+            query: input.query?.trim(),
+            filters: input.filters,
+            sort: input.sort,
             projectId: input.projectId,
             projectIds: input.projectIds?.toSorted(),
             host: input.host?.toLowerCase(),

@@ -1,4 +1,10 @@
-import type { EnvironmentId, IssueListEntry, IssueListResult } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  IssueListEntry,
+  IssueListResult,
+  IssueListSort,
+  IssueListState,
+} from "@t3tools/contracts";
 
 export interface EnvironmentIssue extends IssueListEntry {
   readonly environmentId: EnvironmentId;
@@ -31,23 +37,68 @@ export function mergeIssueLists(values: ReadonlyArray<readonly [EnvironmentId, I
   };
 }
 
-export function groupIssues(entries: ReadonlyArray<EnvironmentIssue>) {
+export function groupIssues(
+  entries: ReadonlyArray<EnvironmentIssue>,
+  sort: IssueListSort = "updated",
+) {
   const groups: Array<{ title: string; entries: EnvironmentIssue[] }> = [
     { title: "Assigned to you", entries: [] },
     { title: "Created by you", entries: [] },
     { title: "Others", entries: [] },
   ];
-  for (const entry of entries.toSorted((left, right) =>
-    right.updatedAt.localeCompare(left.updatedAt),
-  )) {
-    const viewer = entry.viewer?.toLowerCase();
-    const index =
-      viewer !== undefined && entry.assignees.some((actor) => actor.login.toLowerCase() === viewer)
-        ? 0
-        : viewer !== undefined && entry.author?.login.toLowerCase() === viewer
-          ? 1
-          : 2;
+  const compare = (left: EnvironmentIssue, right: EnvironmentIssue) => {
+    const updated = Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+    const ordered =
+      sort === "comments"
+        ? right.commentCount - left.commentCount
+        : sort === "newest"
+          ? Date.parse(right.createdAt) - Date.parse(left.createdAt)
+          : sort === "oldest"
+            ? Date.parse(left.createdAt) - Date.parse(right.createdAt)
+            : updated;
+    return ordered || updated || left.url.localeCompare(right.url);
+  };
+  for (const entry of entries.toSorted(compare)) {
+    const index = { assigned: 0, authored: 1, others: 2 }[issueInvolvement(entry)];
     groups[index]!.entries.push(entry);
   }
   return groups;
+}
+
+export function issueInvolvement(entry: EnvironmentIssue): "assigned" | "authored" | "others" {
+  const viewer = entry.viewer?.toLowerCase();
+  return viewer !== undefined &&
+    entry.assignees.some((actor) => actor.login.toLowerCase() === viewer)
+    ? "assigned"
+    : viewer !== undefined && entry.author?.login.toLowerCase() === viewer
+      ? "authored"
+      : "others";
+}
+
+export function filterIssues(
+  entries: ReadonlyArray<EnvironmentIssue>,
+  filters: {
+    readonly state: IssueListState;
+    readonly involvement?: "all" | "assigned" | "authored" | "others";
+    readonly author?: string | undefined;
+    readonly labels?: ReadonlyArray<string> | undefined;
+    readonly projectId?: string | undefined;
+    readonly environmentId?: string | undefined;
+    readonly host?: string | undefined;
+  },
+) {
+  return entries.filter(
+    (entry) =>
+      (filters.state === "all" || entry.state === filters.state) &&
+      (!filters.environmentId || entry.environmentId === filters.environmentId) &&
+      (!filters.projectId || entry.projectId === filters.projectId) &&
+      (!filters.host || entry.host.toLowerCase() === filters.host.toLowerCase()) &&
+      (!filters.author || entry.author?.login.toLowerCase() === filters.author.toLowerCase()) &&
+      (filters.labels ?? []).every((label) =>
+        entry.labels.some((value) => value.name.toLowerCase() === label.toLowerCase()),
+      ) &&
+      (!filters.involvement ||
+        filters.involvement === "all" ||
+        issueInvolvement(entry) === filters.involvement),
+  );
 }
