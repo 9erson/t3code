@@ -1,3 +1,4 @@
+import { IssueListInput, IssueListResult, IssueOperationError } from "./issue.ts";
 import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
@@ -520,6 +521,9 @@ export const WS_METHODS = {
   cloudInstallRelayClient: "cloud.installRelayClient",
 
   // Pull request methods
+  issuesList: "issues.list",
+  issuesInvalidate: "issues.invalidate",
+  issuesSubscribeRefreshes: "issues.subscribeRefreshes",
   pullRequestsList: "pullRequests.list",
   pullRequestsListStats: "pullRequests.listStats",
   pullRequestsSummary: "pullRequests.summary",
@@ -932,6 +936,24 @@ const WsServerGetBackgroundPolicyRpc = Rpc.make(WS_METHODS.serverGetBackgroundPo
   payload: Schema.Struct({}),
   success: BackgroundPolicySnapshot,
   error: EnvironmentAuthorizationError,
+});
+
+const IssueRpcError = Schema.Union([IssueOperationError, EnvironmentAuthorizationError]);
+const WsIssuesListRpc = Rpc.make(WS_METHODS.issuesList, {
+  payload: IssueListInput,
+  success: IssueListResult,
+  error: IssueRpcError,
+});
+const WsIssuesInvalidateRpc = Rpc.make(WS_METHODS.issuesInvalidate, {
+  payload: Schema.Struct({}),
+  success: Schema.Void,
+  error: EnvironmentAuthorizationError,
+});
+const WsIssuesSubscribeRefreshesRpc = Rpc.make(WS_METHODS.issuesSubscribeRefreshes, {
+  payload: Schema.Struct({}),
+  success: NonNegativeInt,
+  error: EnvironmentAuthorizationError,
+  stream: true,
 });
 
 const PullRequestRpcError = Schema.Union([
@@ -1900,6 +1922,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetBackgroundPolicyRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
+  WsIssuesListRpc,
+  WsIssuesInvalidateRpc,
+  WsIssuesSubscribeRefreshesRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsSummaryRpc,

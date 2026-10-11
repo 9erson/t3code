@@ -109,3 +109,7 @@ export function useEnvironmentMachines() {
 export function useConnectedEnvironmentIds() {
   return useAtomValue(environmentSummaries.connectedEnvironmentIdsAtom);
 }
+
+export function useIssuesSupported() {
+  return useAtomValue(environmentSummaries.issuesSupportedAtom);
+}

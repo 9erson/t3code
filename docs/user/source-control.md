@@ -192,6 +192,17 @@ server, but the host's own site will not show them, and the count reads **viewed
 The **Code** tab is a web and desktop surface. The mobile app reports a pull request's status but
 does not show its diff, so marks are made and read on web and desktop.
 
+## Browse issues
+
+Open **Issues** in the sidebar or use **Open issues** in the command palette to see issues across
+configured GitHub projects. The list groups issues assigned to you, issues you created, and other
+issues. Use **All** to include closed issues, and **Refresh** to fetch changes from GitHub. Select an
+issue to open it on GitHub.
+
+Each environment uses its own GitHub account. A host that cannot be read shows recovery guidance
+while healthy projects still appear. Projects without a remote are excluded; other forges are not
+supported yet.
+
 ## Troubleshooting
 
 - **Not authenticated:** run the provider's login command on the server, then rescan. For Bitbucket,

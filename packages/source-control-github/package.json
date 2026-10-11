@@ -66,6 +66,10 @@
     "./server/githubStackRebase": {
       "types": "./src/server/githubStackRebase.ts",
       "import": "./src/server/githubStackRebase.ts"
+    },
+    "./server/GitHubIssueProvider": {
+      "types": "./src/server/GitHubIssueProvider.ts",
+      "import": "./src/server/GitHubIssueProvider.ts"
     }
   },
   "scripts": {

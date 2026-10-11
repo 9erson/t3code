@@ -198,3 +198,23 @@ describe("environment summary subscriptions", () => {
     }
   });
 });
+
+it("hides issues for older servers and enables them when any environment supports them", () => {
+  const h = harness();
+  try {
+    expect(h.registry.get(h.issuesSupportedAtom)).toBe(false);
+    const current = config();
+    h.registry.set(h.configs(SECOND), {
+      ...current,
+      environment: {
+        ...current.environment,
+        capabilities: { ...current.environment.capabilities, issues: true },
+      },
+    });
+    expect(h.registry.get(h.issuesSupportedAtom)).toBe(true);
+    h.registry.set(h.configs(SECOND), config());
+    expect(h.registry.get(h.issuesSupportedAtom)).toBe(false);
+  } finally {
+    h.registry.dispose();
+  }
+});

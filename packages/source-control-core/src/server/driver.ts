@@ -15,6 +15,7 @@ import type { SourceControlProviderKind } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 
 import type { SourceControlProviderDiscoverySpec } from "./discovery.ts";
+import type { IssueProviderApi } from "./IssueProvider.ts";
 import type { PullRequestProviderApi } from "./PullRequestProvider.ts";
 import type * as SourceControlProvider from "./SourceControlProvider.ts";
 
@@ -23,6 +24,8 @@ export interface SourceControlDriverInstance {
   readonly discovery: SourceControlProviderDiscoverySpec;
   /** Null for a host whose pull requests this build cannot read. */
   readonly pullRequests: PullRequestProviderApi | null;
+  /** Absent for a host whose issues this build cannot read. */
+  readonly issues?: IssueProviderApi | null;
 }
 
 export interface SourceControlDriver<R = never> {
