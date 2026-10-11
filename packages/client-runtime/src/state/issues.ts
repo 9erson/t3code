@@ -3,11 +3,18 @@ import {
   type IssueListInput,
   type EnvironmentId,
   WS_METHODS,
+  IssueOperationError,
+  type IssueLinkInput,
 } from "@t3tools/contracts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { Atom, AsyncResult } from "effect/reactivity";
 import * as Option from "effect/Option";
 import * as Cause from "effect/Cause";
+import * as Crypto from "effect/Crypto";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import { createThread, deleteThread, type CreateThreadInput } from "../operations/commands.ts";
+import { requestGuarded } from "../rpc/client.ts";
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
@@ -19,6 +26,33 @@ export interface IssueListTarget {
   readonly input: IssueListInput;
 }
 export const ISSUE_LIST_MAX_PAGES = 10;
+const isIssueOperationError = Schema.is(IssueOperationError);
+
+/** Persist an idle thread before linking; no provider turn or user message is dispatched. */
+export function createIssueWorkCommand<R, E>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | R, E>,
+) {
+  return createEnvironmentRpcCommand(runtime, {
+    label: "environment-data:issues:work",
+    tag: WS_METHODS.issuesLink,
+    execute: (input: IssueLinkInput & CreateThreadInput) =>
+      Effect.gen(function* () {
+        yield* createThread(input);
+        yield* requestGuarded(WS_METHODS.issuesLink, {
+          threadId: input.threadId,
+          host: input.host,
+          repository: input.repository,
+          number: input.number,
+        }).pipe(Effect.tapError(() => deleteThread({ threadId: input.threadId })));
+      }).pipe(
+        Effect.mapError((cause) =>
+          isIssueOperationError(cause)
+            ? cause
+            : new IssueOperationError({ host: input.host, reason: "transient", cause }),
+        ),
+      ),
+  });
+}
 
 export function createIssueEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,

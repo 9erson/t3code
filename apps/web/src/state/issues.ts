@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   createIssueEnvironmentAtoms,
+  createIssueWorkCommand,
   issueListNextPage,
   ISSUE_LIST_MAX_PAGES,
 } from "@t3tools/client-runtime/state/issues";
@@ -16,6 +17,7 @@ import {
 import { formatEnvironmentQueryError } from "./query";
 
 export const issueEnvironment = createIssueEnvironmentAtoms(connectionAtomRuntime);
+export const workOnIssueCommand = createIssueWorkCommand(connectionAtomRuntime);
 interface Target {
   readonly environmentId: EnvironmentId;
   readonly input: IssueListInput;
