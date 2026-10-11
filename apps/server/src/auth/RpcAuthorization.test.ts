@@ -7,6 +7,9 @@ import {
   DEFAULT_SERVER_SETTINGS,
   ProviderInstanceId,
   ThreadId,
+  ProjectId,
+  type IssueOperationError,
+  type EnvironmentAuthorizationError,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSourceControlWriteScope,
@@ -445,6 +448,59 @@ it.effect("denies manual cleanup before the handler without settings permission"
   }).pipe(Effect.scoped),
 );
 
+it.effect.each([
+  { method: "issues.comment", patch: { body: "Confirmed" } },
+  { method: "issues.setState", patch: { state: "closed" } },
+  { method: "issues.setLabels", patch: { labels: ["bug"] } },
+  { method: "issues.labelCandidates", patch: {} },
+] as const)(
+  "requires source-control write permission before $method reaches its handler",
+  ({ method, patch }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const group = WsRpcGroup.omit(
+          ...[...WsRpcGroup.requests.keys()].filter(
+            (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof method> =>
+              tag !== method,
+          ),
+        );
+        let handled = false;
+        const client = yield* RpcTest.makeClient(group).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              group.toLayerHandler(method, () =>
+                Effect.sync(() => {
+                  handled = true;
+                }).pipe(Effect.andThen(Effect.never)),
+              ),
+              RpcAuthorization.layer([AuthOrchestrationReadScope]),
+            ),
+          ),
+        );
+        const response: Effect.Effect<
+          unknown,
+          IssueOperationError | EnvironmentAuthorizationError
+        > = client[method]({
+          projectId: ProjectId.make("project"),
+          host: "github.com",
+          repository: "acme/web",
+          number: 2,
+          body: "Confirmed",
+          state: "closed",
+          labels: ["bug"],
+          ...patch,
+        });
+        const result = yield* response.pipe(Effect.result);
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") {
+          expect(result.failure).toMatchObject({
+            requiredPermission: AuthSourceControlWriteScope,
+          });
+        }
+        expect(handled).toBe(false);
+      }),
+    ),
+);
 describe("issue link authorization", () => {
   const tested = [
     WS_METHODS.issuesLink,

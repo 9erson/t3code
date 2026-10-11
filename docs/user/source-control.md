@@ -207,6 +207,11 @@ in the URL. Saved issues appear while the list refreshes. Use **Load more** for 
 narrow your search when the paging limit is reached. GitHub search returns at most 1,000 matches
 per repository.
 
+From an issue's details, you can comment, close or reopen it, and apply or remove the repository's
+existing labels. Your connection needs source-control write permission. Changes appear immediately;
+a failed request restores the previous state and shows an error. An unsent comment stays available
+so you can retry.
+
 GitHub issue URLs in chat show issue context on hover and open the detail panel when the repository
 is configured in that environment. ⌘/Ctrl-click opens the original URL in your browser.
 

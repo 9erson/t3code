@@ -1,7 +1,15 @@
 import { ProjectId } from "./baseSchemas.ts";
 import * as Schema from "effect/Schema";
 import { expect, it } from "vite-plus/test";
-import { IssueDetail, IssueRef, IssueListInput, IssueListResult } from "./issue.ts";
+import {
+  IssueDetail,
+  IssueRef,
+  IssueListInput,
+  IssueListResult,
+  IssueCommentInput,
+  IssueSetStateInput,
+  IssueSetLabelsInput,
+} from "./issue.ts";
 
 const decodeDetail = Schema.decodeUnknownSync(IssueDetail);
 const encodeDetail = Schema.encodeSync(IssueDetail);
@@ -61,6 +69,24 @@ it("round-trips issue details with empty descriptions and comment authors", () =
     decodeRef({ projectId: "project", host: "github.com", repository: "acme/web", number: 0 }),
   ).toThrow();
   expect(() => decodeRef({ host: "github.com", repository: "acme/web", number: 42 })).toThrow();
+});
+
+it("bounds issue writes and permits clearing all labels", () => {
+  const reference = { projectId: "project", host: "github.com", repository: "acme/web", number: 2 };
+  const comment = Schema.decodeUnknownSync(IssueCommentInput);
+  expect(comment({ ...reference, body: "  Confirmed  " }).body).toBe("Confirmed");
+  expect(() => comment({ ...reference, body: "   " })).toThrow();
+  expect(() => comment({ ...reference, body: "x".repeat(65537) })).toThrow();
+  const state = Schema.decodeUnknownSync(IssueSetStateInput);
+  expect(state({ ...reference, state: "closed" }).state).toBe("closed");
+  expect(() => state({ ...reference, state: "merged" })).toThrow();
+  const labels = Schema.decodeUnknownSync(IssueSetLabelsInput);
+  expect(labels({ ...reference, labels: [] }).labels).toEqual([]);
+  expect(() => labels({ ...reference, labels: [" "] })).toThrow();
+  expect(() => labels({ ...reference, labels: ["x".repeat(101)] })).toThrow();
+  expect(() =>
+    labels({ ...reference, labels: Array.from({ length: 101 }, () => "bug") }),
+  ).toThrow();
 });
 
 it("round-trips closed scope, qualifier search, filters and sorts while bounding query and cursors", () => {
