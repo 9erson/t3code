@@ -1,5 +1,12 @@
 import type {
   IssueDetail,
+  IssueComment,
+  IssueCommentInput,
+  IssueSetStateInput,
+  IssueState,
+  IssueLabel,
+  IssueLabelCandidatesInput,
+  IssueSetLabelsInput,
   IssueListEntry,
   IssueListState,
   IssueOperationError,
@@ -14,6 +21,18 @@ export type ProviderIssue = Omit<
 export type ProviderIssueDetail = ProviderIssue &
   Pick<IssueDetail, "body" | "comments" | "commentsTruncated">;
 export interface IssueProviderApi {
+  readonly labelCandidates: (
+    input: Omit<IssueLabelCandidatesInput, "projectId"> & { readonly cwd: string },
+  ) => Effect.Effect<ReadonlyArray<IssueLabel>, IssueOperationError>;
+  readonly setLabels: (
+    input: Omit<IssueSetLabelsInput, "projectId"> & { readonly cwd: string },
+  ) => Effect.Effect<ReadonlyArray<IssueLabel>, IssueOperationError>;
+  readonly setState: (
+    input: Omit<IssueSetStateInput, "projectId"> & { readonly cwd: string },
+  ) => Effect.Effect<IssueState, IssueOperationError>;
+  readonly comment: (
+    input: Omit<IssueCommentInput, "projectId"> & { readonly cwd: string },
+  ) => Effect.Effect<IssueComment, IssueOperationError>;
   readonly getIssue: (input: {
     readonly host: string;
     readonly cwd: string;

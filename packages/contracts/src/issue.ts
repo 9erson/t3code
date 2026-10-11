@@ -55,6 +55,28 @@ export const IssueComment = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
+export type IssueComment = typeof IssueComment.Type;
+export const IssueCommentInput = Schema.Struct({
+  ...IssueRef.fields,
+  body: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
+});
+export type IssueCommentInput = typeof IssueCommentInput.Type;
+export type IssueLabel = typeof IssueLabel.Type;
+export const IssueLabelCandidatesInput = Schema.Struct({
+  projectId: ProjectId,
+  host: TrimmedNonEmptyString,
+  repository: TrimmedNonEmptyString,
+});
+export type IssueLabelCandidatesInput = typeof IssueLabelCandidatesInput.Type;
+export const IssueSetLabelsInput = Schema.Struct({
+  ...IssueRef.fields,
+  labels: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(100))).check(
+    Schema.isMaxLength(100),
+  ),
+});
+export type IssueSetLabelsInput = typeof IssueSetLabelsInput.Type;
+export const IssueSetStateInput = Schema.Struct({ ...IssueRef.fields, state: IssueState });
+export type IssueSetStateInput = typeof IssueSetStateInput.Type;
 export const IssueDetail = Schema.Struct({
   ...IssueListEntry.fields,
   workspaceRoot: TrimmedNonEmptyString,
@@ -107,6 +129,7 @@ export const IssueFailureReason = Schema.Literals([
   "transient",
   "invalid-response",
   "not-found",
+  "label-not-found",
 ]);
 export class IssueOperationError extends Schema.TaggedError<IssueOperationError>()(
   "IssueOperationError",
@@ -129,12 +152,14 @@ export class IssueOperationError extends Schema.TaggedError<IssueOperationError>
         return `GitHub rate limit reached for ${this.host}. Wait until the limit resets and refresh.`;
       case "provider-unsupported":
         return "This host cannot be browsed here yet.";
+      case "label-not-found":
+        return "One of the selected labels no longer exists in this repository. Reload labels and try again.";
       case "not-found":
         return "This issue could not be found, or this account cannot see it.";
       case "invalid-response":
         return `GitHub returned an unreadable issues response for ${this.host}. Refresh to retry.`;
       case "transient":
-        return `Could not read issues from ${this.host || "this environment"}. Check the connection and refresh to retry.`;
+        return `Could not complete the issue request on ${this.host || "this environment"}. Check the connection and refresh to retry.`;
     }
   }
 }

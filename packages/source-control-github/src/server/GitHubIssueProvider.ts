@@ -21,6 +21,11 @@ const Actor = Schema.Struct({
   login: TrimmedNonEmptyString,
   avatar_url: Schema.optional(Schema.NullOr(Schema.String)),
 });
+const Label = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  color: Schema.optional(Schema.NullOr(Schema.String)),
+});
+const label = (value: typeof Label.Type) => ({ name: value.name, color: value.color ?? null });
 const Row = Schema.Struct({
   number: PositiveInt,
   title: TrimmedNonEmptyString,
@@ -80,8 +85,9 @@ export const make = Effect.gen(function* () {
     path: string,
     schema: S,
     operation = "listIssues",
+    request: Pick<GitHubApi.GitHubRestInput, "method" | "body"> = {},
   ) =>
-    api.rest({ host, path, operation }).pipe(
+    api.rest({ host, path, operation, ...request }).pipe(
       Effect.mapError(failure),
       Effect.flatMap((response) =>
         response.truncated || response.invalidUtf8
@@ -106,6 +112,79 @@ export const make = Effect.gen(function* () {
   );
   const provider: IssueProviderApi = {
     kind: "github",
+    labelCandidates: Effect.fn("GitHubIssueProvider.labelCandidates")(function* (input) {
+      const repository = input.repository.split("/").map(encodeURIComponent).join("/");
+      const labels: Array<ReturnType<typeof label>> = [];
+      for (let page = 1; page <= 10; page += 1) {
+        const { value, headers } = yield* read(
+          input.host,
+          `repos/${repository}/labels?per_page=100&page=${page}`,
+          Schema.Array(Label),
+          "issueLabelCandidates",
+        );
+        labels.push(...value.map(label));
+        if (!headers.link?.includes('rel="next"')) return labels;
+      }
+      return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
+    }),
+    setLabels: Effect.fn("GitHubIssueProvider.setLabels")(function* (input) {
+      const candidates = yield* provider.labelCandidates(input);
+      const labels: string[] = [];
+      for (const name of input.labels) {
+        const existing = candidates.find(
+          (candidate) => candidate.name.toLowerCase() === name.toLowerCase(),
+        );
+        if (existing === undefined)
+          return yield* new IssueOperationError({ host: input.host, reason: "label-not-found" });
+        if (!labels.includes(existing.name)) labels.push(existing.name);
+      }
+      const repository = input.repository.split("/").map(encodeURIComponent).join("/");
+      const { value } = yield* read(
+        input.host,
+        `repos/${repository}/issues/${input.number}/labels`,
+        Schema.Array(Label),
+        "issueSetLabels",
+        { method: "PUT", body: { labels } },
+      );
+      return value.map(label);
+    }),
+    setState: Effect.fn("GitHubIssueProvider.setState")(function* (input) {
+      const repository = input.repository.split("/").map(encodeURIComponent).join("/");
+      const { value } = yield* read(
+        input.host,
+        `repos/${repository}/issues/${input.number}`,
+        Row,
+        "issueSetState",
+        {
+          method: "PATCH",
+          body: { state: input.state },
+        },
+      );
+      if (value.pull_request !== undefined)
+        return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
+      return value.state;
+    }),
+    comment: Effect.fn("GitHubIssueProvider.comment")(function* (input) {
+      const repository = input.repository.split("/").map(encodeURIComponent).join("/");
+      const { value } = yield* read(
+        input.host,
+        `repos/${repository}/issues/${input.number}/comments`,
+        Comment,
+        "issueComment",
+        {
+          method: "POST",
+          body: { body: input.body },
+        },
+      );
+      return {
+        id: value.id,
+        url: value.html_url,
+        author: value.user === null ? null : actor(value.user),
+        body: value.body ?? "",
+        createdAt: value.created_at,
+        updatedAt: value.updated_at,
+      };
+    }),
     getIssue: Effect.fn("GitHubIssueProvider.getIssue")(function* (input) {
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
       const path = `repos/${repository}/issues/${input.number}`;

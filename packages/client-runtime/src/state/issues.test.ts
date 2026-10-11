@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectId, WS_METHODS } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, WS_METHODS, type IssueDetail } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Latch from "effect/Latch";
@@ -20,6 +20,28 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import { createIssueEnvironmentAtoms } from "./issues.ts";
 
+const fixture: IssueDetail = {
+  projectId: ProjectId.make("project"),
+  host: "github.com",
+  repository: "acme/web",
+  number: 2,
+  provider: "github",
+  projectTitle: "Web",
+  workspaceRoot: "/repo",
+  title: "A bug",
+  url: "https://github.com/acme/web/issues/2",
+  author: null,
+  assignees: [],
+  labels: [],
+  commentCount: 0,
+  state: "open",
+  body: "Description",
+  comments: [],
+  commentsTruncated: false,
+  createdAt: "2026-07-01T00:00:00Z",
+  updatedAt: "2026-07-02T00:00:00Z",
+};
+
 it.effect("revalidates mounted issues on a server push and after manual invalidation", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -33,10 +55,10 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
             errors: [],
             nextCursors: {},
             truncated: false,
-            entries: [{ title }],
+            entries: [{ ...fixture, title }],
           })),
         [WS_METHODS.issuesDetail]: () =>
-          Effect.sync(() => ({ title, body: `Body: ${title}`, comments: [] })),
+          Effect.sync(() => ({ ...fixture, title, body: `Body: ${title}`, comments: [] })),
         [WS_METHODS.issuesSubscribeRefreshes]: () => SubscriptionRef.changes(revision),
         [WS_METHODS.issuesInvalidate]: () => SubscriptionRef.update(revision, (value) => value + 1),
       } as unknown as WsRpcProtocolClient;

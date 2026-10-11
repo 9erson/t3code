@@ -1,6 +1,13 @@
 import {
   IssueOperationError,
   type IssueDetail,
+  type IssueComment,
+  type IssueCommentInput,
+  type IssueLabel,
+  type IssueLabelCandidatesInput,
+  type IssueSetLabelsInput,
+  type IssueSetStateInput,
+  type IssueState,
   IssueRef,
   type IssueListInput,
   type IssueListResult,
@@ -32,6 +39,18 @@ const decodeDetailKey = Schema.decodeSync(detailKeyCodec);
 export class IssueService extends Context.Service<
   IssueService,
   {
+    readonly labelCandidates: (
+      input: IssueLabelCandidatesInput,
+    ) => Effect.Effect<ReadonlyArray<IssueLabel>, IssueOperationError>;
+    readonly setState: (
+      input: IssueSetStateInput,
+    ) => Effect.Effect<IssueState, IssueOperationError>;
+    readonly setLabels: (
+      input: IssueSetLabelsInput,
+    ) => Effect.Effect<ReadonlyArray<IssueLabel>, IssueOperationError>;
+    readonly comment: (
+      input: IssueCommentInput,
+    ) => Effect.Effect<IssueComment, IssueOperationError>;
     readonly detail: (input: IssueRef) => Effect.Effect<IssueDetail, IssueOperationError>;
     readonly list: (input: IssueListInput) => Effect.Effect<IssueListResult, IssueOperationError>;
     readonly invalidate: () => Effect.Effect<void>;
@@ -235,35 +254,41 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.seconds(30) : Duration.zero),
     },
   );
+  const resolve = Effect.fn("IssueService.resolve")(function* (
+    input: Pick<IssueRef, "projectId" | "host" | "repository">,
+  ) {
+    const shell = yield* projects
+      .getShell(input.projectId)
+      .pipe(
+        Effect.mapError(
+          (cause) => new IssueOperationError({ host: input.host, reason: "transient", cause }),
+        ),
+      );
+    if (Option.isNone(shell))
+      return yield* new IssueOperationError({ host: input.host, reason: "not-found" });
+    const project = shell.value;
+    const identity =
+      project.repositoryIdentity == null || project.repositoryIdentity.provider === "unknown"
+        ? yield* identities.resolve(project.workspaceRoot)
+        : project.repositoryIdentity;
+    const repository = sourceControlRepositorySelector(identity);
+    const kind = (identity?.provider ?? "unknown") as SourceControlProviderKind;
+    const host = pullRequestHostOf(identity, kind);
+    if (
+      repository === null ||
+      repository.toLowerCase() !== input.repository.toLowerCase() ||
+      host !== input.host.toLowerCase()
+    )
+      return yield* new IssueOperationError({ host: input.host, reason: "not-found" });
+    const api = registry.get(kind);
+    if (api === null)
+      return yield* new IssueOperationError({ host, reason: "provider-unsupported" });
+    return { project, api, host, repository, kind };
+  });
   const details = yield* Cache.makeWith(
     Effect.fn("IssueService.detail")(function* (key: string) {
       const input = decodeDetailKey(key);
-      const shell = yield* projects
-        .getShell(input.projectId)
-        .pipe(
-          Effect.mapError(
-            (cause) => new IssueOperationError({ host: input.host, reason: "transient", cause }),
-          ),
-        );
-      if (Option.isNone(shell))
-        return yield* new IssueOperationError({ host: input.host, reason: "not-found" });
-      const project = shell.value;
-      const identity =
-        project.repositoryIdentity == null || project.repositoryIdentity.provider === "unknown"
-          ? yield* identities.resolve(project.workspaceRoot)
-          : project.repositoryIdentity;
-      const repository = sourceControlRepositorySelector(identity);
-      const kind = (identity?.provider ?? "unknown") as SourceControlProviderKind;
-      const host = pullRequestHostOf(identity, kind);
-      if (
-        repository === null ||
-        repository.toLowerCase() !== input.repository.toLowerCase() ||
-        host !== input.host.toLowerCase()
-      )
-        return yield* new IssueOperationError({ host: input.host, reason: "not-found" });
-      const api = registry.get(kind);
-      if (api === null)
-        return yield* new IssueOperationError({ host, reason: "provider-unsupported" });
+      const { project, api, host, repository, kind } = yield* resolve(input);
       const detail = yield* api.getIssue({
         host,
         repository,
@@ -286,7 +311,47 @@ export const make = Effect.gen(function* () {
       timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.seconds(60) : Duration.zero),
     },
   );
+  const invalidate = Effect.fn("IssueService.invalidate")(function* () {
+    // Finish clearing persisted reads before publishing a new memory-cache epoch.
+    yield* readCache.invalidate;
+    epoch += 1;
+    yield* Cache.invalidateAll(cache);
+    yield* Cache.invalidateAll(details);
+    yield* SubscriptionRef.update(refreshes, (value) => value + 1);
+  });
   return IssueService.of({
+    labelCandidates: Effect.fn("IssueService.labelCandidates")(function* (input) {
+      const { api, project, host, repository } = yield* resolve(input);
+      return yield* api.labelCandidates({ host, repository, cwd: project.workspaceRoot });
+    }),
+    setState: Effect.fn("IssueService.setState")(function* (input) {
+      const { api, project, host, repository } = yield* resolve(input);
+      const state = yield* api.setState({ ...input, host, repository, cwd: project.workspaceRoot });
+      yield* invalidate();
+      return state;
+    }),
+    setLabels: Effect.fn("IssueService.setLabels")(function* (input) {
+      const { api, project, host, repository } = yield* resolve(input);
+      const labels = yield* api.setLabels({
+        ...input,
+        host,
+        repository,
+        cwd: project.workspaceRoot,
+      });
+      yield* invalidate();
+      return labels;
+    }),
+    comment: Effect.fn("IssueService.comment")(function* (input) {
+      const { api, project, host, repository } = yield* resolve(input);
+      const comment = yield* api.comment({
+        ...input,
+        host,
+        repository,
+        cwd: project.workspaceRoot,
+      });
+      yield* invalidate();
+      return comment;
+    }),
     detail: (input) =>
       Cache.get(
         details,
@@ -315,14 +380,7 @@ export const make = Effect.gen(function* () {
           },
         }),
       ),
-    invalidate: Effect.fn("IssueService.invalidate")(function* () {
-      // Finish clearing persisted reads before publishing a new memory-cache epoch.
-      yield* readCache.invalidate;
-      epoch += 1;
-      yield* Cache.invalidateAll(cache);
-      yield* Cache.invalidateAll(details);
-      yield* SubscriptionRef.update(refreshes, (value) => value + 1);
-    }),
+    invalidate,
     subscribeRefreshes: SubscriptionRef.changes(refreshes),
   });
 });
