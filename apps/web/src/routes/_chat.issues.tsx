@@ -1,9 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { CircleCheckIcon, CircleDotIcon, MessageSquareIcon } from "lucide-react";
-import { lazy, Suspense, useMemo, useState } from "react";
-import { IssueListState } from "@t3tools/contracts";
-import * as Schema from "effect/Schema";
-import * as Option from "effect/Option";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { pullRequestHostOf, type IssueListInput } from "@t3tools/contracts";
+import { parseIssueSearch } from "@t3tools/shared/issueSearch";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { SidebarTrigger } from "../components/ui/sidebar";
 import { Button } from "../components/ui/button";
@@ -22,10 +21,9 @@ import {
   clearIssueSelectionSearch,
   issueSelectionFromSearch,
   issueSelectionSearch,
-  type IssuesSearch,
 } from "../components/issue/issueSelection.logic";
 import { showPullRequestLinkContextMenu } from "../components/pullRequest/pullRequestLinkContextMenu";
-import { groupIssues } from "../components/issue/issueList.logic";
+import { filterIssues, groupIssues } from "../components/issue/issueList.logic";
 import { useEnvironments } from "../state/environments";
 import { issueEnvironment, useIssueList } from "../state/issues";
 import { formatEnvironmentQueryError } from "../state/query";
@@ -33,16 +31,25 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { isElectron } from "../env";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 
+import {
+  readIssueListPreferences,
+  writeIssueListPreferences,
+  validateIssueListSearch,
+  type IssueListPreferencePatch,
+} from "../components/issue/issueListPreferences";
+import { IssueListFilters, IssueListSortMenu } from "../components/issue/IssueListFilters";
+import { PullRequestSearchInput } from "../components/pullRequest/PullRequestListFilters";
+import { useProjects } from "../state/entities";
+
 const IssueDetailPanel = lazy(() =>
   import("../components/issue/IssueDetailPanel").then((module) => ({
     default: module.IssueDetailPanel,
   })),
 );
-const decodeState = Schema.decodeUnknownOption(IssueListState);
 
 export const Route = createFileRoute("/_chat/issues")({
-  validateSearch: (search: Record<string, unknown>): IssuesSearch => ({
-    state: Option.getOrElse(decodeState(search.state), () => "open"),
+  validateSearch: (search: Record<string, unknown>) => ({
+    ...validateIssueListSearch(search, readIssueListPreferences()),
     ...issueSelectionSearch(issueSelectionFromSearch(search)),
   }),
   component: IssuesPage,
@@ -61,12 +68,107 @@ function IssuesPage() {
         .map((environment) => environment.environmentId),
     [environments],
   );
-  const targets = useMemo(
-    () => environmentIds.map((environmentId) => ({ environmentId, input: { state } })),
-    [environmentIds, state],
-  );
+  const projects = useProjects();
+  const updateList = (patch: IssueListPreferencePatch) =>
+    void navigate({
+      search: (previous) => ({
+        ...validateIssueListSearch({ ...previous, ...patch }),
+        ...issueSelectionSearch(issueSelectionFromSearch(previous)),
+      }),
+      replace: true,
+    });
+  useEffect(() => {
+    writeIssueListPreferences(search);
+  }, [search]);
+  useEffect(() => {
+    void navigate({ search: (previous) => previous, replace: true });
+  }, [navigate]);
+  const [sentQuery, setSentQuery] = useState(search.q ?? "");
+  useEffect(() => {
+    const timer = setTimeout(() => setSentQuery(search.q ?? ""), 300);
+    return () => clearTimeout(timer);
+  }, [search.q]);
+  const querySettled = sentQuery === (search.q ?? "");
+  const targets = useMemo(() => {
+    const input: IssueListInput = {
+      state,
+      limit: 100,
+      sort: search.issueSort,
+      ...(sentQuery ? { query: sentQuery } : {}),
+      ...(search.projectId ? { projectId: search.projectId } : {}),
+      ...(search.host ? { host: search.host } : {}),
+      filters: {
+        ...(search.author ? { author: search.author } : {}),
+        ...(search.labels?.length ? { labels: search.labels } : {}),
+      },
+    };
+    return environmentIds
+      .filter(
+        (environmentId) =>
+          (!search.environmentId || search.environmentId === environmentId) &&
+          (!search.projectId ||
+            projects.some(
+              (project) =>
+                project.id === search.projectId && project.environmentId === environmentId,
+            )),
+      )
+      .map((environmentId) => ({ environmentId, input }));
+  }, [
+    environmentIds,
+    projects,
+    search.environmentId,
+    search.projectId,
+    search.host,
+    search.issueSort,
+    search.author,
+    search.labels,
+    state,
+    sentQuery,
+  ]);
   const query = useIssueList(targets);
-  const groups = useMemo(() => groupIssues(query.data?.entries ?? []), [query.data]);
+  const groups = useMemo(
+    () =>
+      groupIssues(
+        filterIssues(query.data?.entries ?? [], {
+          ...search,
+          involvement: search.issueInvolvement,
+          state: parseIssueSearch(search.q ?? "").state ?? state,
+        }),
+        search.issueSort,
+      ),
+    [query.data, search, state],
+  );
+  const facets = useMemo(
+    () => ({
+      hosts: [
+        ...new Set([
+          ...(query.data?.providers.map((provider) => provider.host) ?? []),
+          ...projects
+            .filter(
+              (project) =>
+                environmentIds.includes(project.environmentId) &&
+                project.repositoryIdentity != null,
+            )
+            .map((project) => pullRequestHostOf(project.repositoryIdentity, "unknown")),
+        ]),
+      ],
+      authors: [
+        ...new Set(
+          query.data?.entries.flatMap((entry) => (entry.author ? [entry.author.login] : [])) ?? [],
+        ),
+      ]
+        .sort()
+        .slice(0, 200),
+      labels: [
+        ...new Set(
+          query.data?.entries.flatMap((entry) => entry.labels.map((label) => label.name)) ?? [],
+        ),
+      ]
+        .sort()
+        .slice(0, 200),
+    }),
+    [query.data, projects, environmentIds],
+  );
   const invalidate = useAtomCommand(issueEnvironment.invalidate, { reportFailure: false });
   const [invalidating, setInvalidating] = useState(false);
   const [refreshErrors, setRefreshErrors] = useState<string[]>([]);
@@ -94,7 +196,11 @@ function IssuesPage() {
   const errors = [...query.errors, ...refreshErrors];
   const unsupported = environmentIds.length === 0;
   const unavailable = query.data === null && errors.length > 0;
-  const empty = query.data !== null && query.data.entries.length === 0;
+  const empty =
+    query.data !== null &&
+    groups.every((group) => group.entries.length === 0) &&
+    !query.isPending &&
+    querySettled;
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <WorkspacePageHeader electron={isElectron}>
@@ -115,23 +221,51 @@ function IssuesPage() {
           </Button>
         </div>
       </WorkspacePageHeader>
-      <div className="flex gap-1 border-b px-4 py-2" role="group" aria-label="Issue state">
-        {(["open", "all"] as const).map((tab) => (
-          <Button
-            key={tab}
-            variant={tab === state ? "secondary" : "ghost"}
-            size="sm"
-            aria-pressed={tab === state}
-            onClick={() => void navigate({ search: (previous) => ({ ...previous, state: tab }) })}
-          >
-            {tab === "open" ? "Open" : "All"}
-          </Button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
+        <div className="flex gap-1" role="group" aria-label="Issue state">
+          {(["all", "open", "closed"] as const).map((tab) => (
+            <Button
+              key={tab}
+              variant={tab === state ? "secondary" : "ghost"}
+              size="sm"
+              aria-pressed={tab === state}
+              onClick={() => updateList({ state: tab })}
+            >
+              {tab === "open" ? "Open" : tab === "closed" ? "Closed" : "All"}
+            </Button>
+          ))}
+        </div>
+        <div className="min-w-48 flex-1">
+          <PullRequestSearchInput
+            subject="issues"
+            value={search.q ?? ""}
+            busy={!querySettled || query.isPending}
+            onChange={(q) => updateList({ q: q.slice(0, 256) || undefined })}
+          />
+        </div>
+        <IssueListSortMenu
+          value={search.issueSort}
+          onChange={(sort) => updateList({ issueSort: sort })}
+        />
+        <IssueListFilters
+          value={search}
+          onChange={updateList}
+          projects={projects.filter((project) => environmentIds.includes(project.environmentId))}
+          environments={environments.filter((environment) =>
+            environmentIds.includes(environment.environmentId),
+          )}
+          {...facets}
+        />
       </div>
       <div className="flex min-h-0 flex-1">
         <div
           className={`scrollbar-gutter-both min-h-0 min-w-0 flex-1 overflow-y-auto px-4 py-3 ${selection ? "hidden md:block" : ""}`}
         >
+          {query.showingSnapshot ? (
+            <p role="status" className="mb-2 text-xs text-muted-foreground">
+              Showing saved issues. {query.isPending ? "Refreshing…" : "Refresh to try again."}
+            </p>
+          ) : null}
           {[...new Set(errors)].map((error) => (
             <p role="alert" key={error} className="mb-3 text-sm text-destructive">
               {error}
@@ -176,8 +310,8 @@ function IssuesPage() {
                     : unavailable
                       ? errors[0]
                       : state === "open"
-                        ? "There are no open issues in your configured GitHub projects."
-                        : "There are no issues in your configured GitHub projects."}
+                        ? "No open issues match these filters."
+                        : "No issues match these filters."}
                 </EmptyDescription>
               </EmptyHeader>
               {unavailable ? (
@@ -204,7 +338,7 @@ function IssuesPage() {
                     const Icon = entry.state === "open" ? CircleDotIcon : CircleCheckIcon;
                     return (
                       <a
-                        key={`${entry.host}:${entry.repository}:${entry.number}`}
+                        key={`${entry.host.toLowerCase()}:${entry.repository.toLowerCase()}:${entry.number}`}
                         href={entry.url}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -281,9 +415,20 @@ function IssuesPage() {
               ),
             )
           )}
-          {query.data?.truncated ? (
+          {query.canLoadMore ? (
+            <div className="px-3 py-3">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={query.isPending || !querySettled}
+                onClick={query.loadMore}
+              >
+                Load more
+              </Button>
+            </div>
+          ) : query.pageLimitReached ? (
             <p className="px-3 text-xs text-muted-foreground">
-              Some repositories have more issues than this list can show.
+              Narrow your search to find more issues.
             </p>
           ) : null}
         </div>

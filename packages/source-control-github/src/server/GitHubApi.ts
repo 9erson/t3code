@@ -373,6 +373,7 @@ export const make = Effect.gen(function* () {
     readonly acceptNotModified: boolean;
     /** Reads the body for GraphQL `errors`, which GitHub sends with HTTP 200. */
     readonly graphql?: boolean;
+    readonly resource?: "core" | "search";
   }) {
     const host = normalizeHost(input.host);
     // Only the path: a query string can carry a SHA or a branch, and never needs to be in a trace.
@@ -385,10 +386,8 @@ export const make = Effect.gen(function* () {
     });
     const { token, fingerprint } = yield* credential(host);
     const scope = yield* SourceControlRateLimit.CredentialScope;
-    // REST spends `core` and GraphQL its own quota, each with its own reserve. Every REST path
-    // this reads today is `core`; a `search/` read would need its own resource here. A refusal
-    // still pauses the whole host, the key PullRequestService records its own backoff under.
-    const resource = input.graphql === true ? "graphql" : "core";
+    // Search has a separate, much smaller REST quota. A refusal still pauses the host.
+    const resource = input.graphql === true ? "graphql" : (input.resource ?? "core");
     const key = { provider: "github" as const, host };
     const run = Effect.gen(function* () {
       const lease = yield* quota
@@ -525,6 +524,7 @@ export const make = Effect.gen(function* () {
           timeout: input.timeout,
           allowReserve: input.allowReserve ?? interactive,
           acceptNotModified: input.ifNoneMatch !== undefined,
+          resource: /^\/*search\//.test(input.path) ? "search" : "core",
         }),
       ),
     );

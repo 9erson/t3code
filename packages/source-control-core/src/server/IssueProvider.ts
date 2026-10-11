@@ -9,6 +9,8 @@ import type {
   IssueSetLabelsInput,
   IssueListEntry,
   IssueListState,
+  IssueListSort,
+  IssueListFilters,
   IssueOperationError,
   SourceControlProviderKind,
 } from "@t3tools/contracts";
@@ -50,6 +52,9 @@ export interface IssueProviderApi {
     readonly repository: string;
     readonly state: IssueListState;
     readonly limit: number;
+    readonly query?: string;
+    readonly filters?: IssueListFilters;
+    readonly sort?: IssueListSort;
     readonly cursor?: string;
   }) => Effect.Effect<
     { readonly items: ReadonlyArray<ProviderIssue>; readonly nextCursor: string | null },

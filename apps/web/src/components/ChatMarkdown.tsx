@@ -210,6 +210,8 @@ import {
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
+import { IssueLinkPreview } from "./issue/IssueLinkPreview";
+import { resolveIssueLinkTarget } from "./issue/issueLink.logic";
 
 interface ChatMarkdownProps {
   text: string;
@@ -2965,6 +2967,15 @@ const CHAT_MARKDOWN_COMPONENTS = {
           })
         : null;
       const isSameDocumentLink = href?.startsWith("#") ?? false;
+      const issuePreviewTarget =
+        href && !isPullRequestAutolink
+          ? resolveIssueLinkTarget({
+              environmentId,
+              projects,
+              issuesEnabled: serverConfig?.environment.capabilities.issues === true,
+              url: href,
+            })
+          : null;
       const onClick = props.onClick;
       const canOpenInPreview =
         canOperatePreview && Boolean(threadRef && isPreviewAvailableFor(threadRef.environmentId));
@@ -3125,6 +3136,16 @@ const CHAT_MARKDOWN_COMPONENTS = {
                 environmentId ?? undefined,
               )
             }
+            onOpenFallback={openDeferredMarkdownLink}
+          />
+        );
+      }
+      if (issuePreviewTarget !== null) {
+        return (
+          <IssueLinkPreview
+            link={link}
+            originalUrl={href}
+            target={issuePreviewTarget}
             onOpenFallback={openDeferredMarkdownLink}
           />
         );

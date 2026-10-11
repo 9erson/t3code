@@ -149,6 +149,7 @@ it.effect.each(writeCases)(
         const gate = new Promise<void>((resolve) => {
           release = resolve;
         });
+        yield* Effect.addFinalizer(() => Effect.sync(release));
         let current = detail;
         const respond = <A>(update: () => A) =>
           Effect.promise(async () => {
@@ -210,6 +211,7 @@ it.effect.each(writeCases)(
         expect(
           expectedWrite((yield* AtomRegistry.getResult(registry, rows)).entries[0]!, method),
         ).toEqual(optimistic);
+        expect(registry.get(rows).waiting).toBe(true);
         release();
         const result = yield* Effect.promise(() => write);
         expect(result._tag).toBe(succeeds ? "Success" : "Failure");

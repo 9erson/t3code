@@ -4,6 +4,8 @@ import {
   type IssueRef,
   type IssueDetail,
   type IssueListEntry,
+  type IssueListInput,
+  type IssueListResult,
 } from "@t3tools/contracts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import * as Cause from "effect/Cause";
@@ -20,8 +22,15 @@ import {
   createEnvironmentRpcSubscriptionAtomFamily,
 } from "./runtime.ts";
 
+export interface IssueListTarget {
+  readonly environmentId: EnvironmentId;
+  readonly input: IssueListInput;
+}
+export const ISSUE_LIST_MAX_PAGES = 10;
+
 type Target<Input> = { readonly environmentId: EnvironmentId; readonly input: Input };
 type IssuePatch = Partial<Pick<IssueDetail, "state" | "labels" | "comments" | "commentCount">>;
+/** @public Required for the web client's inferred atom declarations. */
 export interface IssueWriteStatus {
   readonly patch: IssuePatch;
   readonly pending: boolean;
@@ -99,16 +108,19 @@ export function createIssueEnvironmentAtoms<R, E>(
   const listViews = Atom.family((source: ReturnType<typeof rawList>) =>
     Atom.transform(source, (get) => {
       const result = get(source);
-      return AsyncResult.map(result, (value) => ({
+      let pending = false;
+      const mapped = AsyncResult.map(result, (value) => ({
         ...value,
-        entries: value.entries.map((entry) =>
-          applyPatch(
-            entry,
-            get(writeStatus({ environmentId: listTargets.get(source)!, input: entry })),
-            timestamp(result),
-          ),
-        ),
+        entries: value.entries.map((entry) => {
+          const status = get(
+            writeStatus({ environmentId: listTargets.get(source)!, input: entry }),
+          );
+          pending ||= status.pending;
+          return applyPatch(entry, status, timestamp(result));
+        }),
       }));
+      // Saved lists must not persist a provisional write that can still roll back.
+      return pending ? AsyncResult.waiting(mapped) : mapped;
     }),
   );
   const listTargets = new WeakMap<ReturnType<typeof rawList>, EnvironmentId>();
@@ -182,6 +194,27 @@ export function createIssueEnvironmentAtoms<R, E>(
     refreshes,
     list,
     detail,
+    listPages: Atom.family((key: string) =>
+      Atom.make((get) => {
+        const targets = JSON.parse(key) as ReadonlyArray<IssueListTarget>;
+        const values = new Map<EnvironmentId, IssueListResult>();
+        const errors: Cause.Cause<unknown>[] = [];
+        let isPending = false;
+        for (const target of targets) {
+          const result = get(list(target));
+          isPending ||= result.waiting || result._tag === "Initial";
+          if (result._tag === "Failure") errors.push(result.cause);
+          const value = Option.getOrNull(AsyncResult.value(result));
+          if (value === null) continue;
+          const previous = values.get(target.environmentId);
+          values.set(
+            target.environmentId,
+            previous === undefined ? value : mergeIssueListPages(previous, value),
+          );
+        }
+        return { values: [...values.entries()], errors, isPending };
+      }),
+    ),
     writeStatus,
     labelCandidates,
     setState: {
@@ -238,4 +271,49 @@ export function createIssueEnvironmentAtoms<R, E>(
       tag: WS_METHODS.issuesInvalidate,
     }),
   };
+}
+
+/** A continuation replaces cursor state, but retains rows and hosts from exhausted repositories. */
+export function mergeIssueListPages(
+  previous: IssueListResult,
+  next: IssueListResult,
+): IssueListResult {
+  const entries = new Map(
+    previous.entries.map((entry) => [
+      `${entry.host.toLowerCase()} ${entry.repository.toLowerCase()} ${entry.number}`,
+      entry,
+    ]),
+  );
+  for (const entry of next.entries) {
+    const key = `${entry.host.toLowerCase()} ${entry.repository.toLowerCase()} ${entry.number}`;
+    const old = entries.get(key);
+    if (old === undefined || (entry.observedAt ?? 0) >= (old.observedAt ?? 0))
+      entries.set(key, entry);
+  }
+  const providers = new Map(previous.providers.map((provider) => [provider.host, provider]));
+  for (const provider of next.providers) providers.set(provider.host, provider);
+  const errors = new Map(previous.errors.map((error) => [error.projectId, error]));
+  for (const entry of next.entries) errors.delete(entry.projectId);
+  for (const error of next.errors) errors.set(error.projectId, error);
+  return {
+    ...next,
+    viewers: { ...previous.viewers, ...next.viewers },
+    entries: [...entries.values()],
+    providers: [...providers.values()],
+    errors: [...errors.values()],
+  };
+}
+
+/** Cursor-less environments are exhausted; every continuation keeps the original bounded limit. */
+export function issueListNextPage(
+  targets: ReadonlyArray<IssueListTarget>,
+  values: ReadonlyArray<readonly [EnvironmentId, IssueListResult]>,
+  pagesRead: number,
+): ReadonlyArray<IssueListTarget> {
+  if (pagesRead >= ISSUE_LIST_MAX_PAGES) return [];
+  return targets.flatMap((target) => {
+    const result = values.find(([environmentId]) => environmentId === target.environmentId)?.[1];
+    if (!result || Object.keys(result.nextCursors).length === 0) return [];
+    return [{ ...target, input: { ...target.input, cursors: result.nextCursors } }];
+  });
 }

@@ -88,3 +88,21 @@ it("bounds issue writes and permits clearing all labels", () => {
     labels({ ...reference, labels: Array.from({ length: 101 }, () => "bug") }),
   ).toThrow();
 });
+
+it("round-trips closed scope, qualifier search, filters and sorts while bounding query and cursors", () => {
+  const input = {
+    state: "closed",
+    query: 'label:"needs review" author:octocat is:open',
+    filters: { labels: ["bug"], author: "octocat" },
+    sort: "comments",
+    cursors: { "github.com acme/web": "2:3" },
+  };
+  expect(decode(input)).toEqual(input);
+  for (const invalid of [
+    { query: "x".repeat(257) },
+    { sort: "random" },
+    { filters: { labels: Array(11).fill("bug") } },
+    { cursors: { "github.com acme/web": "x".repeat(4097) } },
+  ])
+    expect(() => decode({ state: "open", ...invalid })).toThrow();
+});
