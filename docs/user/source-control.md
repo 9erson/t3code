@@ -219,6 +219,10 @@ Each environment uses its own GitHub account. A host that cannot be read shows r
 while healthy projects still appear. Projects without a remote are excluded; other forges are not
 supported yet.
 
+Use **Work on this** to create a linked thread in the repository's project and environment with
+its default agent. The composer contains the issue's title, description, and URL; review or edit
+the prompt, then send it to start work.
+
 To associate existing work with an issue, use **Link issue to thread** in the command palette, or
 open **Linked issues** from the thread’s panel menu. Find an issue by title, paste its GitHub URL,
 or enter its number from the thread’s repository. Linked issues stay with the thread across

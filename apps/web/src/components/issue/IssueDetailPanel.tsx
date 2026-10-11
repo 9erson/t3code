@@ -14,6 +14,7 @@ import {
 import { PullRequestLabelChip } from "../pullRequest/pullRequestPresentation";
 import { IssueDetailActions } from "./IssueDetailActions";
 import type { IssueSelection } from "./issueSelection.logic";
+import { useWorkOnIssue } from "./useWorkOnIssue";
 
 export function IssueDetailPanel({
   selection,
@@ -24,6 +25,7 @@ export function IssueDetailPanel({
   supported: boolean;
   onClose: () => void;
 }) {
+  const issueWork = useWorkOnIssue();
   const { environmentId, projectId, host, repository, number } = selection;
   const reference = { projectId, host, repository, number };
   const atom = useMemo(
@@ -101,6 +103,15 @@ export function IssueDetailPanel({
               ) : null}
               <header className="space-y-3">
                 <h2 className="text-lg font-semibold break-words">{detail.title}</h2>
+                <Button
+                  size="sm"
+                  disabled={
+                    issueWork.pending !== null || !supported || !issueWork.available(selection)
+                  }
+                  onClick={() => void issueWork.workOnIssue(selection, detail)}
+                >
+                  {issueWork.pending !== null ? "Preparing…" : "Work on this"}
+                </Button>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span
                     className={`inline-flex items-center gap-1 font-medium ${detail.state === "open" ? "text-success" : "text-primary"}`}
