@@ -98,6 +98,12 @@ const makeFixture = Effect.fnUntraced(function* (read: IssueProviderApi["getIssu
   const reads = yield* Queue.unbounded<number>();
   const calls = yield* Ref.make<ReadonlyArray<number>>([]);
   const provider: IssueProviderApi = {
+    create: () => Effect.die("Background synchronization does not create issues"),
+    assigneeCandidates: () => Effect.die("Background synchronization does not read assignees"),
+    comment: () => Effect.die("Background synchronization does not write comments"),
+    setState: () => Effect.die("Background synchronization does not write states"),
+    setLabels: () => Effect.die("Background synchronization does not write labels"),
+    labelCandidates: () => Effect.die("Background synchronization does not read labels"),
     kind: "github",
     getIssueSummary: (input) =>
       Ref.update(calls, (calls) => [...calls, input.number]).pipe(

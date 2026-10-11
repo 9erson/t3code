@@ -1,5 +1,8 @@
 import {
   IssueOperationError,
+  IssueCreateInput,
+  type IssueActor,
+  type IssueAssigneeCandidatesInput,
   type IssueComment,
   type IssueCommentInput,
   type IssueLabel,
@@ -35,6 +38,7 @@ import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolv
 import * as IssueReadCache from "./IssueReadCache.ts";
 import * as IssueProviderRegistry from "./IssueProviderRegistry.ts";
 
+const decodeCreate = Schema.decodeEffect(IssueCreateInput);
 const detailKeyCodec = Schema.fromJsonString(IssueRef);
 const encodeDetailKey = Schema.encodeSync(detailKeyCodec);
 const decodeDetailKey = Schema.decodeSync(detailKeyCodec);
@@ -48,6 +52,12 @@ const isIssueOperationError = Schema.is(IssueOperationError);
 export class IssueService extends Context.Service<
   IssueService,
   {
+    readonly create: (
+      input: IssueCreateInput,
+    ) => Effect.Effect<IssueListEntry, IssueOperationError>;
+    readonly assigneeCandidates: (
+      input: IssueAssigneeCandidatesInput,
+    ) => Effect.Effect<ReadonlyArray<IssueActor>, IssueOperationError>;
     readonly labelCandidates: (
       input: IssueLabelCandidatesInput,
     ) => Effect.Effect<ReadonlyArray<IssueLabel>, IssueOperationError>;
@@ -395,6 +405,29 @@ export const make = Effect.gen(function* () {
     yield* SubscriptionRef.update(refreshes, (value) => value + 1);
   });
   return IssueService.of({
+    create: Effect.fn("IssueService.create")(function* (draft) {
+      const input = yield* decodeCreate(draft).pipe(
+        Effect.mapError(
+          (cause) => new IssueOperationError({ host: draft.host, reason: "invalid-input", cause }),
+        ),
+      );
+      const { api, project, host, repository, kind } = yield* resolve(input);
+      const issue = yield* api.create({ ...input, host, repository, cwd: project.workspaceRoot });
+      yield* invalidate();
+      return {
+        ...issue,
+        host,
+        repository,
+        provider: kind,
+        projectId: project.id,
+        projectTitle: project.title,
+        observedAt: yield* Clock.currentTimeMillis,
+      };
+    }),
+    assigneeCandidates: Effect.fn("IssueService.assigneeCandidates")(function* (input) {
+      const { api, project, host, repository } = yield* resolve(input);
+      return yield* api.assigneeCandidates({ host, repository, cwd: project.workspaceRoot });
+    }),
     labelCandidates: Effect.fn("IssueService.labelCandidates")(function* (input) {
       const { api, project, host, repository } = yield* resolve(input);
       return yield* api.labelCandidates({ host, repository, cwd: project.workspaceRoot });

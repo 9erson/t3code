@@ -2,6 +2,7 @@ import { ProjectId } from "./baseSchemas.ts";
 import * as Schema from "effect/Schema";
 import { expect, it } from "vite-plus/test";
 import {
+  IssueCreateInput,
   IssueDetail,
   IssueRef,
   IssueListInput,
@@ -105,4 +106,23 @@ it("round-trips closed scope, qualifier search, filters and sorts while bounding
     { cursors: { "github.com acme/web": "x".repeat(4097) } },
   ])
     expect(() => decode({ state: "open", ...invalid })).toThrow();
+});
+
+it("validates new issue fields while preserving markdown and allowing an empty body", () => {
+  const decode = Schema.decodeUnknownSync(IssueCreateInput);
+  const draft = {
+    projectId: "project",
+    host: "github.com",
+    repository: "acme/web",
+    title: "  Fix bug  ",
+    body: "  ```\nexample\n```\n",
+    labels: ["bug"],
+    assignees: ["octocat"],
+  };
+  expect(decode(draft)).toEqual({ ...draft, title: "Fix bug" });
+  expect(decode({ ...draft, body: "", labels: [], assignees: [] }).body).toBe("");
+  expect(() => decode({ ...draft, title: " " })).toThrow();
+  expect(() => decode({ ...draft, title: "x".repeat(257) })).toThrow();
+  expect(() => decode({ ...draft, body: "x".repeat(65537) })).toThrow();
+  expect(() => decode({ ...draft, assignees: Array(11).fill("octocat") })).toThrow();
 });

@@ -761,3 +761,168 @@ it.effect(
       }
     }),
 );
+
+it.effect("loads all repository assignee candidates across pages", () =>
+  Effect.gen(function* () {
+    const paths: string[] = [];
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+        graphql: () => Effect.die("REST only"),
+        rest: ({ path }) => {
+          paths.push(path);
+          return Effect.succeed({
+            status: 200,
+            truncated: false,
+            invalidUtf8: false,
+            headers: path.endsWith("page=1") ? { link: '<next>; rel="next"' } : {},
+            body: JSON.stringify(path.endsWith("page=1") ? [actor] : [{ login: "maintainer" }]),
+          });
+        },
+      }),
+    );
+    const candidates = yield* provider.assigneeCandidates({
+      host: "github.com",
+      repository: "acme/web",
+      cwd: "/repo",
+    });
+    expect(candidates).toEqual([
+      { login: "octocat", name: null, avatarUrl: actor.avatar_url },
+      { login: "maintainer", name: null, avatarUrl: null },
+    ]);
+    expect(paths).toEqual([
+      "repos/acme/web/assignees?per_page=100&page=1",
+      "repos/acme/web/assignees?per_page=100&page=2",
+    ]);
+  }),
+);
+
+it.effect("creates an issue with markdown and canonical existing labels and assignees", () =>
+  Effect.gen(function* () {
+    const writes: GitHubApi.GitHubRestInput[] = [];
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+        graphql: () => Effect.die("REST only"),
+        rest: (request) => {
+          if (request.method === "POST") writes.push(request);
+          return Effect.succeed({
+            status: 201,
+            headers: {},
+            truncated: false,
+            invalidUtf8: false,
+            body: JSON.stringify(
+              request.path.includes("/labels?")
+                ? issue.labels
+                : request.path.includes("/assignees?")
+                  ? [actor]
+                  : issue,
+            ),
+          });
+        },
+      }),
+    );
+    const created = yield* provider.create({
+      host: "github.com",
+      repository: "acme/web",
+      cwd: "/repo",
+      title: "A bug",
+      body: "  ```\nexample\n```\n",
+      labels: ["BUG"],
+      assignees: ["OCTOCAT"],
+    });
+    expect(created).toMatchObject({
+      number: 2,
+      title: "A bug",
+      labels: [{ name: "bug", color: "ff0000" }],
+      assignees: [{ login: "octocat" }],
+    });
+    expect(writes).toMatchObject([
+      {
+        host: "github.com",
+        path: "repos/acme/web/issues",
+        method: "POST",
+        body: {
+          title: "A bug",
+          body: "  ```\nexample\n```\n",
+          labels: ["bug"],
+          assignees: ["octocat"],
+        },
+      },
+    ]);
+  }),
+);
+
+it.effect.each([
+  { status: 422, reason: "invalid-input" },
+  { status: 403, reason: "authentication" },
+])("reports GitHub create rejection $status as a typed $reason failure", ({ status, reason }) =>
+  Effect.gen(function* () {
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+        graphql: () => Effect.die("REST only"),
+        rest: () =>
+          Effect.fail(
+            new GitHubApi.GitHubApiResponseError({
+              host: "github.com",
+              operation: "issueCreate",
+              status,
+            }),
+          ),
+      }),
+    );
+    const failure = yield* provider
+      .create({
+        host: "github.com",
+        repository: "acme/web",
+        cwd: "/repo",
+        title: "A bug",
+        body: "",
+        labels: [],
+        assignees: [],
+      })
+      .pipe(Effect.flip);
+    expect(failure).toMatchObject({ _tag: "IssueOperationError", reason });
+  }),
+);
+
+it.effect.each([
+  { labels: ["new label"], assignees: [], reason: "label-not-found" },
+  { labels: [], assignees: ["stranger"], reason: "assignee-not-found" },
+])(
+  "rejects unavailable create metadata with $reason without filing an issue",
+  ({ labels, assignees, reason }) =>
+    Effect.gen(function* () {
+      let writes = 0;
+      const provider = yield* GitHubIssueProvider.make.pipe(
+        Effect.provideService(GitHubApi.GitHubApi, {
+          credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+          graphql: () => Effect.die("REST only"),
+          rest: (request) => {
+            if (request.method === "POST") writes++;
+            return Effect.succeed({
+              status: 200,
+              headers: {},
+              truncated: false,
+              invalidUtf8: false,
+              body: "[]",
+            });
+          },
+        }),
+      );
+      const failure = yield* provider
+        .create({
+          host: "github.com",
+          repository: "acme/web",
+          cwd: "/repo",
+          title: "A bug",
+          body: "",
+          labels,
+          assignees,
+        })
+        .pipe(Effect.flip);
+      expect(failure).toMatchObject({ _tag: "IssueOperationError", reason });
+      expect(writes).toBe(0);
+    }),
+);

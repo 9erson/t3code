@@ -94,6 +94,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.secretsAnswerRequest]: "secrets",
   [WS_METHODS.cloudGetRelayClientStatus]: "cloud",
   [WS_METHODS.cloudInstallRelayClient]: "cloud",
+  [WS_METHODS.issuesCreate]: "issues",
+  [WS_METHODS.issuesAssigneeCandidates]: "issues",
   [WS_METHODS.issuesComment]: "issues",
   [WS_METHODS.issuesSetState]: "issues",
   [WS_METHODS.issuesSetLabels]: "issues",

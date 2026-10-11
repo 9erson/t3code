@@ -39,6 +39,8 @@ import {
 } from "../components/issue/issueListPreferences";
 import { IssueListFilters, IssueListSortMenu } from "../components/issue/IssueListFilters";
 import { PullRequestSearchInput } from "../components/pullRequest/PullRequestListFilters";
+import { CreateIssueControl } from "../components/issue/CreateIssueControl";
+import { issueCreationTargets } from "../components/issue/issueComposer.logic";
 import { useProjects } from "../state/entities";
 
 const IssueDetailPanel = lazy(() =>
@@ -69,6 +71,10 @@ function IssuesPage() {
     [environments],
   );
   const projects = useProjects();
+  const creationTargets = useMemo(
+    () => issueCreationTargets(projects, environmentIds),
+    [projects, environmentIds],
+  );
   const updateList = (patch: IssueListPreferencePatch) =>
     void navigate({
       search: (previous) => ({
@@ -209,7 +215,39 @@ function IssuesPage() {
         </div>
         <h1 className="text-sm font-medium">Issues</h1>
         <div className="flex-1" />
-        <div className="[-webkit-app-region:no-drag]">
+        <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
+          <CreateIssueControl
+            targets={creationTargets}
+            preferredKey={
+              search.projectId
+                ? creationTargets.find(
+                    (target) =>
+                      target.projectId === search.projectId &&
+                      (!search.environmentId || target.environmentId === search.environmentId),
+                  )?.key
+                : undefined
+            }
+            onCreated={(target, issue) => {
+              query.refresh();
+              void navigate({
+                search: (previous) => ({
+                  ...validateIssueListSearch({
+                    ...previous,
+                    state: "open",
+                    q: undefined,
+                    labels: undefined,
+                    author: undefined,
+                    host: target.host,
+                    projectId: target.projectId,
+                    environmentId: target.environmentId,
+                    issueInvolvement: "all",
+                    issueSort: "newest",
+                  }),
+                  ...issueSelectionSearch({ ...issue, environmentId: target.environmentId }),
+                }),
+              });
+            }}
+          />
           <Button
             variant="ghost"
             size="sm"

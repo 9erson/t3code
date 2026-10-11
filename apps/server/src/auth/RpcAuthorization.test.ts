@@ -449,6 +449,7 @@ it.effect("denies manual cleanup before the handler without settings permission"
 );
 
 it.effect.each([
+  { method: "issues.create", patch: { title: "New bug", assignees: [] } },
   { method: "issues.comment", patch: { body: "Confirmed" } },
   { method: "issues.setState", patch: { state: "closed" } },
   { method: "issues.setLabels", patch: { labels: ["bug"] } },
@@ -485,6 +486,8 @@ it.effect.each([
           host: "github.com",
           repository: "acme/web",
           number: 2,
+          title: "New bug",
+          assignees: [],
           body: "Confirmed",
           state: "closed",
           labels: ["bug"],

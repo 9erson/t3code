@@ -112,7 +112,15 @@ export const make = Effect.gen(function* () {
             reason:
               search && error._tag === "GitHubApiResponseError" && error.status === 422
                 ? "invalid-query"
-                : mapped.reason,
+                : operation === "issueCreate" &&
+                    error._tag === "GitHubApiResponseError" &&
+                    error.status === 422
+                  ? "invalid-input"
+                  : operation === "issueCreate" &&
+                      error._tag === "GitHubApiResponseError" &&
+                      error.status === 403
+                    ? "authentication"
+                    : mapped.reason,
             ...(mapped.retryAt === undefined ? {} : { retryAt: mapped.retryAt }),
             ...(mapped.reason === "rate-limited"
               ? { rateLimitResource: search ? ("search" as const) : ("core" as const) }
@@ -144,6 +152,58 @@ export const make = Effect.gen(function* () {
   );
   const provider: IssueProviderApi = {
     kind: "github",
+    create: Effect.fn("GitHubIssueProvider.create")(function* (input) {
+      const labels: string[] = [];
+      if (input.labels.length > 0) {
+        const candidates = yield* provider.labelCandidates(input);
+        for (const name of input.labels) {
+          const candidate = candidates.find(
+            (label) => label.name.toLowerCase() === name.toLowerCase(),
+          );
+          if (candidate === undefined)
+            return yield* new IssueOperationError({ host: input.host, reason: "label-not-found" });
+          if (!labels.includes(candidate.name)) labels.push(candidate.name);
+        }
+      }
+      const assignees: string[] = [];
+      if (input.assignees.length > 0) {
+        const candidates = yield* provider.assigneeCandidates(input);
+        for (const login of input.assignees) {
+          const candidate = candidates.find(
+            (actor) => actor.login.toLowerCase() === login.toLowerCase(),
+          );
+          if (candidate === undefined)
+            return yield* new IssueOperationError({
+              host: input.host,
+              reason: "assignee-not-found",
+            });
+          if (!assignees.includes(candidate.login)) assignees.push(candidate.login);
+        }
+      }
+      const repository = input.repository.split("/").map(encodeURIComponent).join("/");
+      const { value } = yield* read(input.host, `repos/${repository}/issues`, Row, "issueCreate", {
+        method: "POST",
+        body: { title: input.title, body: input.body, labels, assignees },
+      });
+      if (value.pull_request !== undefined)
+        return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
+      return toIssue(value);
+    }),
+    assigneeCandidates: Effect.fn("GitHubIssueProvider.assigneeCandidates")(function* (input) {
+      const repository = input.repository.split("/").map(encodeURIComponent).join("/");
+      const candidates: Array<ReturnType<typeof actor>> = [];
+      for (let page = 1; page <= 10; page += 1) {
+        const { value, headers } = yield* read(
+          input.host,
+          `repos/${repository}/assignees?per_page=100&page=${page}`,
+          Schema.Array(Actor),
+          "issueAssigneeCandidates",
+        );
+        candidates.push(...value.map(actor));
+        if (!headers.link?.includes('rel="next"')) return candidates;
+      }
+      return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
+    }),
     labelCandidates: Effect.fn("GitHubIssueProvider.labelCandidates")(function* (input) {
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
       const labels: Array<ReturnType<typeof label>> = [];
