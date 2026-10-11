@@ -200,6 +200,9 @@ issues. Use **All** to include closed issues, and **Refresh** to fetch changes f
 issue to read its description and comment timeline in T3 Code. Use **Open on GitHub** or
 ⌘/Ctrl-click an issue to open its GitHub page.
 
+GitHub issue URLs in chat show issue context on hover and open the detail panel when the repository
+is configured in that environment. ⌘/Ctrl-click opens the original URL in your browser.
+
 Each environment uses its own GitHub account. A host that cannot be read shows recovery guidance
 while healthy projects still appear. Projects without a remote are excluded; other forges are not
 supported yet.
