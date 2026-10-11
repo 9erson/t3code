@@ -58,10 +58,19 @@ const detail: IssueDetail = {
   author: null,
   assignees: [],
   labels: [],
-  commentCount: 0,
+  commentCount: 3,
   state: "open",
   body: "Description",
-  comments: [],
+  comments: [
+    {
+      id: 7,
+      url: "https://github.com/acme/web/issues/2#issuecomment-7",
+      author: null,
+      body: "Original reply",
+      createdAt: "2026-07-01T00:00:00Z",
+      updatedAt: "2026-07-01T00:00:00Z",
+    },
+  ],
   commentsTruncated: false,
   createdAt: "2026-07-01T00:00:00Z",
   updatedAt: "2026-07-02T00:00:00Z",
@@ -165,7 +174,7 @@ it.effect.each(writeCases)(
             ),
           );
         const client = {
-          [WS_METHODS.issuesDetail]: () => Effect.sync(() => current),
+          [WS_METHODS.issuesDetail]: () => Effect.promise(async () => current),
           [WS_METHODS.issuesList]: () =>
             Effect.sync(() => ({
               viewers: {},
@@ -188,7 +197,11 @@ it.effect.each(writeCases)(
             }),
           [WS_METHODS.issuesComment]: () =>
             respond(() => {
-              current = { ...current, comments: [comment], commentCount: 1 };
+              current = {
+                ...current,
+                comments: [...current.comments, comment],
+                commentCount: current.commentCount + 1,
+              };
               return comment;
             }),
         } as unknown as WsRpcProtocolClient;
@@ -204,10 +217,10 @@ it.effect.each(writeCases)(
           input: { ...input, state: "closed", labels: ["bug"], body: "Confirmed" },
         });
         yield* Effect.promise(() => entered);
-        const optimistic = method === "setState" ? "closed" : method === "setLabels" ? ["bug"] : 1;
-        expect(expectedWrite(yield* AtomRegistry.getResult(registry, panel), method)).toEqual(
-          optimistic,
-        );
+        const optimistic = method === "setState" ? "closed" : method === "setLabels" ? ["bug"] : 4;
+        const pending = yield* AtomRegistry.getResult(registry, panel);
+        expect(expectedWrite(pending, method)).toEqual(optimistic);
+        expect(pending.comments[0]).toEqual(detail.comments[0]);
         expect(
           expectedWrite((yield* AtomRegistry.getResult(registry, rows)).entries[0]!, method),
         ).toEqual(optimistic);
@@ -216,6 +229,7 @@ it.effect.each(writeCases)(
         const result = yield* Effect.promise(async () => await write);
         expect(result._tag).toBe(succeeds ? "Success" : "Failure");
         const settled = yield* AtomRegistry.getResult(registry, panel);
+        expect(settled.comments[0]).toEqual(detail.comments[0]);
         expect(expectedWrite(settled, method)).toEqual(
           succeeds ? optimistic : expectedWrite(detail, method),
         );

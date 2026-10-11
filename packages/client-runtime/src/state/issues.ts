@@ -81,6 +81,16 @@ export function createIssueEnvironmentAtoms<R, E>(
     refreshIntervalMs: 60_000,
     refreshTrigger: ({ environmentId }) => refreshes({ environmentId, input: {} }),
   });
+  const detailSource = ({ environmentId, input }: Target<IssueRef>) =>
+    rawDetail({
+      environmentId,
+      input: {
+        projectId: input.projectId,
+        host: input.host,
+        repository: input.repository,
+        number: input.number,
+      },
+    });
   const statuses = Atom.family((_key: string) =>
     Atom.make<IssueWriteStatus>({ patch: {}, pending: false, settledAt: 0, error: null }).pipe(
       Atom.setIdleTTL("5 minutes"),
@@ -101,7 +111,7 @@ export function createIssueEnvironmentAtoms<R, E>(
   );
   const detailTargets = new WeakMap<ReturnType<typeof rawDetail>, EnvironmentId>();
   const detail = (target: Target<IssueRef>) => {
-    const source = rawDetail(target);
+    const source = detailSource(target);
     detailTargets.set(source, target.environmentId);
     return detailViews(source);
   };
@@ -147,7 +157,7 @@ export function createIssueEnvironmentAtoms<R, E>(
           const previous = registry.get(status);
           const current = Option.getOrNull(AsyncResult.value(registry.get(detail(target))));
           const now = await Effect.runPromise(Clock.currentTimeMillis);
-          const raw = registry.get(rawDetail(target));
+          const raw = registry.get(detailSource(target));
           const previousPatch = timestamp(raw) <= previous.settledAt ? previous.patch : {};
           const optimisticPatch = { ...previousPatch, ...patch(target.input, current, now) };
           registry.set(status, {
@@ -164,7 +174,7 @@ export function createIssueEnvironmentAtoms<R, E>(
               settledAt: await Effect.runPromise(Clock.currentTimeMillis),
               error: null,
             });
-            registry.refresh(rawDetail(target));
+            registry.refresh(detailSource(target));
           } else {
             const failure = Cause.squash(result.cause);
             registry.set(status, {

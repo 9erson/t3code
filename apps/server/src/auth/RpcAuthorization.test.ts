@@ -490,8 +490,13 @@ it.effect.each([
           labels: ["bug"],
           ...patch,
         });
-        const result = yield* response.pipe(Effect.flip);
-        expect(result).toMatchObject({ requiredPermission: AuthSourceControlWriteScope });
+        const result = yield* response.pipe(Effect.result);
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") {
+          expect(result.failure).toMatchObject({
+            requiredPermission: AuthSourceControlWriteScope,
+          });
+        }
         expect(handled).toBe(false);
       }),
     ),
