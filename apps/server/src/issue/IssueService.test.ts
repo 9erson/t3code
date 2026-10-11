@@ -48,7 +48,6 @@ const projects = [
 ];
 const provider: IssueProviderApi = {
   kind: "github",
-  getIssueSummary: () => Effect.die("Detail and list tests do not read summaries"),
   getIssue: (input) =>
     provider.listIssues({ ...input, state: "open", limit: 1 }).pipe(
       Effect.map((page) => ({
@@ -320,6 +319,89 @@ it.effect("does not cache failed detail reads and refuses a stale repository sel
       yield* service.detail({ ...input, repository: "acme/old" }).pipe(Effect.result),
     ).toMatchObject({ _tag: "Failure", failure: { reason: "not-found" } });
   }),
+);
+
+it.effect(
+  "keeps search/filter/sort caches separate and only continues unfinished scoped repositories",
+  () =>
+    Effect.gen(function* () {
+      const service = yield* make([projects[0]!, project("second", "github.com")], {
+        ...provider,
+        listIssues: (input) =>
+          provider.listIssues(input).pipe(
+            Effect.map((page) => ({
+              items: page.items.map((row) => ({
+                ...row,
+                title: `${input.state}/${input.query ?? ""}/${input.filters?.author ?? ""}/${input.sort ?? "updated"}/${input.cursor ?? "first"}`,
+              })),
+              nextCursor:
+                input.repository === "acme/healthy" && input.cursor === undefined ? "2:0" : null,
+            })),
+          ),
+      });
+      const first = yield* service.list({
+        state: "closed",
+        query: "label:bug",
+        filters: { author: "alice" },
+        sort: "oldest",
+      });
+      expect(first.entries.map((entry) => entry.title)).toEqual([
+        "closed/label:bug/alice/oldest/first",
+        "closed/label:bug/alice/oldest/first",
+      ]);
+      expect(first.nextCursors).toEqual({ "github.com acme/healthy": "2:0" });
+      const next = yield* service.list({
+        state: "closed",
+        query: "label:bug",
+        filters: { author: "alice" },
+        sort: "oldest",
+        cursors: first.nextCursors,
+      });
+      expect(next.entries.map((entry) => entry.projectId)).toEqual(["healthy"]);
+      expect(next.entries[0]?.title).toBe("closed/label:bug/alice/oldest/2:0");
+      expect(next.nextCursors).toEqual({});
+      const changed = yield* service.list({
+        state: "closed",
+        query: "author:bob",
+        filters: { author: "bob" },
+        sort: "comments",
+      });
+      expect(changed.entries[0]?.title).toBe("closed/author:bob/bob/comments/first");
+    }),
+);
+
+it.effect(
+  "retains a failed repository's continuation so a partial failure cannot strand its remaining issues",
+  () =>
+    Effect.gen(function* () {
+      const service = yield* make([projects[0]!, project("second", "github.com")], {
+        ...provider,
+        listIssues: (input) =>
+          input.repository === "acme/second"
+            ? Effect.fail(new IssueOperationError({ host: input.host, reason: "transient" }))
+            : provider.listIssues(input),
+      });
+      const result = yield* service.list({
+        state: "open",
+        cursors: { "github.com acme/healthy": "2:0", "github.com acme/second": "3:7" },
+      });
+      expect(result.entries.map((row) => row.projectId)).toEqual(["healthy"]);
+      expect(result.nextCursors).toEqual({ "github.com acme/second": "3:7" });
+      expect(result.truncated).toBe(true);
+    }),
+);
+
+it.effect(
+  "retains continuation positions for a temporarily unreadable host alongside healthy hosts",
+  () =>
+    Effect.gen(function* () {
+      const service = yield* make([projects[0]!, projects[1]!]);
+      const result = yield* service.list({
+        state: "open",
+        cursors: { "github.com acme/healthy": "2:0", "ghe.example acme/broken": "4:9" },
+      });
+      expect(result.nextCursors).toEqual({ "ghe.example acme/broken": "4:9" });
+    }),
 );
 
 it.effect(

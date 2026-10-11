@@ -28,7 +28,9 @@ export {
   changeRequestRepositoryUrl,
 } from "@t3tools/shared/changeRequestUrl";
 
-function resolvedForgejoRepository(project: EnvironmentProject): URL | null {
+function resolvedForgejoRepository(
+  project: Pick<EnvironmentProject, "repositoryIdentity">,
+): URL | null {
   const identity = project.repositoryIdentity;
   if (identity?.provider !== "forgejo" || !identity.webUrl) return null;
   try {
@@ -41,7 +43,7 @@ function resolvedForgejoRepository(project: EnvironmentProject): URL | null {
 
 /** Keep Forgejo servers on different HTTP ports separate when selecting a project. */
 function matchesChangeRequestAuthority(
-  project: EnvironmentProject,
+  project: Pick<EnvironmentProject, "repositoryIdentity">,
   link: ChangeRequestLink,
 ): boolean {
   if (link.authority === undefined) return true;
@@ -62,10 +64,9 @@ function matchesChangeRequestAuthority(
  * groups and Azure project paths need — and the host is the first segment of the canonical
  * remote, so github.com and an Enterprise install stay apart.
  */
-export function findProjectForChangeRequest(
-  projects: ReadonlyArray<EnvironmentProject>,
-  link: ChangeRequestLink,
-): EnvironmentProject | undefined {
+export function findProjectForChangeRequest<
+  Project extends Pick<EnvironmentProject, "repositoryIdentity">,
+>(projects: ReadonlyArray<Project>, link: ChangeRequestLink): Project | undefined {
   return projects.find((project) => {
     const identity = project.repositoryIdentity;
     if (!identity || !matchesChangeRequestAuthority(project, link)) return false;

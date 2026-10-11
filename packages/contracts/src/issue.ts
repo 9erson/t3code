@@ -63,12 +63,26 @@ export const IssueDetail = Schema.Struct({
   commentsTruncated: Schema.Boolean,
 });
 export type IssueDetail = typeof IssueDetail.Type;
+export const IssueListSort = Schema.Literals(["updated", "newest", "oldest", "comments"]);
+export type IssueListSort = typeof IssueListSort.Type;
+export const IssueListFilters = Schema.Struct({
+  author: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
+  labels: Schema.optional(
+    Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(100))).check(
+      Schema.isMaxLength(10),
+    ),
+  ),
+});
+export type IssueListFilters = typeof IssueListFilters.Type;
 export const IssueListCursors = Schema.Record(
   TrimmedNonEmptyString,
   TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
 );
 export const IssueListInput = Schema.Struct({
   state: IssueListState,
+  query: Schema.optional(Schema.String.check(Schema.isMaxLength(256))),
+  filters: Schema.optional(IssueListFilters),
+  sort: Schema.optional(IssueListSort),
   projectId: Schema.optional(ProjectId),
   projectIds: Schema.optional(Schema.Array(ProjectId).check(Schema.isMaxLength(100))),
   host: Schema.optional(TrimmedNonEmptyString),
@@ -108,6 +122,7 @@ export const IssueFailureReason = Schema.Literals([
   "invalid-response",
   "repository-unavailable",
   "not-found",
+  "invalid-query",
 ]);
 export class IssueOperationError extends Schema.TaggedError<IssueOperationError>()(
   "IssueOperationError",
@@ -115,6 +130,7 @@ export class IssueOperationError extends Schema.TaggedError<IssueOperationError>
     host: Schema.String,
     reason: IssueFailureReason,
     retryAt: Schema.optionalKey(Schema.Finite),
+    rateLimitResource: Schema.optionalKey(Schema.Literals(["core", "search"])),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -127,13 +143,15 @@ export class IssueOperationError extends Schema.TaggedError<IssueOperationError>
       case "authentication":
         return `GitHub refused the credential for ${this.host}. Update the saved token or run \`gh auth login --hostname ${this.host}\` and retry.`;
       case "rate-limited":
-        return `GitHub rate limit reached for ${this.host}. Wait until the limit resets and refresh.`;
+        return `GitHub${this.rateLimitResource === "search" ? " search" : ""} rate limit reached for ${this.host}. Wait until the limit resets and refresh.`;
       case "provider-unsupported":
         return "This host cannot be browsed here yet.";
       case "repository-unavailable":
         return `No configured GitHub project can read issues from ${this.host}. Add the repository as a project and retry.`;
       case "not-found":
         return "This issue could not be found, or this account cannot see it.";
+      case "invalid-query":
+        return `GitHub could not run this issue search on ${this.host}. Check the qualifiers and narrow your query.`;
       case "invalid-response":
         return `GitHub returned an unreadable issues response for ${this.host}. Refresh to retry.`;
       case "transient":

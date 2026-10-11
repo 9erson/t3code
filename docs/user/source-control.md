@@ -196,9 +196,19 @@ does not show its diff, so marks are made and read on web and desktop.
 
 Open **Issues** in the sidebar or use **Open issues** in the command palette to see issues across
 configured GitHub projects. The list groups issues assigned to you, issues you created, and other
-issues. Use **All** to include closed issues, and **Refresh** to fetch changes from GitHub. Select an
+issues. Choose open, closed, or all issues, and **Refresh** to fetch changes from GitHub. Select an
 issue to read its description and comment timeline in T3 Code. Use **Open on GitHub** or
 ⌘/Ctrl-click an issue to open its GitHub page.
+
+Filter by label, author, project, host, or environment, and sort by update time, creation time,
+or comment count. Search accepts GitHub qualifiers such as `label:"help wanted" author:octocat
+is:closed`; an explicit state qualifier overrides the state tab. Choices are remembered and included
+in the URL. Saved issues appear while the list refreshes. Use **Load more** for additional results;
+narrow your search when the paging limit is reached. GitHub search returns at most 1,000 matches
+per repository.
+
+GitHub issue URLs in chat show issue context on hover and open the detail panel when the repository
+is configured in that environment. ⌘/Ctrl-click opens the original URL in your browser.
 
 Each environment uses its own GitHub account. A host that cannot be read shows recovery guidance
 while healthy projects still appear. Projects without a remote are excluded; other forges are not
