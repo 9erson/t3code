@@ -99,6 +99,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.issuesUnlink]: "issues",
   [WS_METHODS.issuesSummary]: "issues",
   [WS_METHODS.issuesLinkedThreads]: "issues",
+  [WS_METHODS.issuesDetail]: "issues",
   [WS_METHODS.issuesInvalidate]: "issues",
   [WS_METHODS.issuesSubscribeRefreshes]: "issues",
   [WS_METHODS.pullRequestsList]: "pull-requests",

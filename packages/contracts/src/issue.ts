@@ -40,6 +40,29 @@ export const IssueListEntry = Schema.Struct({
   observedAt: Schema.optional(Schema.Finite),
 });
 export type IssueListEntry = typeof IssueListEntry.Type;
+export const IssueRef = Schema.Struct({
+  projectId: ProjectId,
+  host: TrimmedNonEmptyString,
+  repository: TrimmedNonEmptyString,
+  number: PositiveInt,
+});
+export type IssueRef = typeof IssueRef.Type;
+export const IssueComment = Schema.Struct({
+  id: PositiveInt,
+  url: TrimmedNonEmptyString,
+  author: Schema.NullOr(IssueActor),
+  body: Schema.String,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export const IssueDetail = Schema.Struct({
+  ...IssueListEntry.fields,
+  workspaceRoot: TrimmedNonEmptyString,
+  body: Schema.String,
+  comments: Schema.Array(IssueComment),
+  commentsTruncated: Schema.Boolean,
+});
+export type IssueDetail = typeof IssueDetail.Type;
 export const IssueListCursors = Schema.Record(
   TrimmedNonEmptyString,
   TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
@@ -84,6 +107,7 @@ export const IssueFailureReason = Schema.Literals([
   "transient",
   "invalid-response",
   "repository-unavailable",
+  "not-found",
 ]);
 export class IssueOperationError extends Schema.TaggedError<IssueOperationError>()(
   "IssueOperationError",
@@ -108,6 +132,8 @@ export class IssueOperationError extends Schema.TaggedError<IssueOperationError>
         return "This host cannot be browsed here yet.";
       case "repository-unavailable":
         return `No configured GitHub project can read issues from ${this.host}. Add the repository as a project and retry.`;
+      case "not-found":
+        return "This issue could not be found, or this account cannot see it.";
       case "invalid-response":
         return `GitHub returned an unreadable issues response for ${this.host}. Refresh to retry.`;
       case "transient":

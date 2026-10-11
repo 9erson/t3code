@@ -1,7 +1,12 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as KeyValueStore from "effect/persistence/KeyValueStore";
+import * as GitHubApi from "@t3tools/source-control-github/server/GitHubApi";
+import * as GitHubIssueProvider from "@t3tools/source-control-github/server/GitHubIssueProvider";
+import * as Redacted from "effect/Redacted";
 import * as IssueReadCache from "./IssueReadCache.ts";
 import { expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -43,7 +48,17 @@ const projects = [
 ];
 const provider: IssueProviderApi = {
   kind: "github",
-  getIssue: () => Effect.die("List tests do not read individual issues"),
+  getIssueSummary: () => Effect.die("Detail and list tests do not read summaries"),
+  getIssue: (input) =>
+    provider.listIssues({ ...input, state: "open", limit: 1 }).pipe(
+      Effect.map((page) => ({
+        ...page.items[0]!,
+        number: input.number,
+        body: "Issue body",
+        comments: [],
+        commentsTruncated: false,
+      })),
+    ),
   getViewer: ({ host }) =>
     host === "ghe.example"
       ? Effect.fail(new IssueOperationError({ host, reason: "credentials-missing" }))
@@ -202,13 +217,119 @@ it.effect("refines stored unknown hosts through the git-remote resolver", () =>
 );
 
 it.effect(
+  "coalesces simultaneous detail reads and refreshes cached details after invalidation",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let requests = 0;
+        const github = yield* GitHubIssueProvider.make.pipe(
+          Effect.provideService(GitHubApi.GitHubApi, {
+            credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+            graphql: () => Effect.die("REST only"),
+            rest: ({ path }) =>
+              Effect.gen(function* () {
+                if (path.includes("/comments?"))
+                  return {
+                    status: 200,
+                    headers: {},
+                    truncated: false,
+                    invalidUtf8: false,
+                    body: "[]",
+                  };
+                requests += 1;
+                const revision = requests;
+                yield* Deferred.succeed(started, undefined);
+                yield* Deferred.await(release);
+                return {
+                  status: 200,
+                  headers: {},
+                  truncated: false,
+                  invalidUtf8: false,
+                  body: JSON.stringify({
+                    number: 2,
+                    title: "Fix bug",
+                    html_url: "https://github.com/acme/healthy/issues/2",
+                    user: null,
+                    labels: [],
+                    assignees: [],
+                    comments: 0,
+                    state: "open",
+                    body: `Revision ${revision}`,
+                    created_at: "2026-07-01T00:00:00Z",
+                    updated_at: "2026-07-02T00:00:00Z",
+                  }),
+                };
+              }),
+          }),
+        );
+        const service = yield* make([projects[0]!], github);
+        const input = {
+          projectId: projects[0]!.id,
+          host: "github.com",
+          repository: "acme/healthy",
+          number: 2,
+        };
+        const reads = yield* Effect.all([service.detail(input), service.detail(input)], {
+          concurrency: 2,
+        }).pipe(Effect.forkScoped);
+        yield* Deferred.await(started);
+        yield* Deferred.succeed(release, undefined);
+        const answers = yield* Fiber.join(reads);
+        expect(answers.map((detail) => detail.body)).toEqual(["Revision 1", "Revision 1"]);
+        expect(answers[0]).toMatchObject({
+          projectId: "healthy",
+          host: "github.com",
+          workspaceRoot: "/healthy",
+          repository: "acme/healthy",
+        });
+        expect((yield* service.detail(input)).body).toBe("Revision 1");
+        expect(requests).toBe(1);
+        yield* service.invalidate();
+        expect((yield* service.detail(input)).body).toBe("Revision 2");
+      }),
+    ),
+);
+
+it.effect("does not cache failed detail reads and refuses a stale repository selection", () =>
+  Effect.gen(function* () {
+    let signedIn = false;
+    const service = yield* make([projects[0]!], {
+      ...provider,
+      getIssue: (input) =>
+        signedIn
+          ? provider.getIssue(input)
+          : Effect.fail(
+              new IssueOperationError({ host: input.host, reason: "credentials-missing" }),
+            ),
+    });
+    const input = {
+      projectId: projects[0]!.id,
+      host: "github.com",
+      repository: "acme/healthy",
+      number: 2,
+    };
+    expect(yield* service.detail(input).pipe(Effect.result)).toMatchObject({
+      _tag: "Failure",
+      failure: { reason: "credentials-missing" },
+    });
+    signedIn = true;
+    expect((yield* service.detail(input)).body).toBe("Issue body");
+    expect(
+      yield* service.detail({ ...input, repository: "acme/old" }).pipe(Effect.result),
+    ).toMatchObject({ _tag: "Failure", failure: { reason: "not-found" } });
+  }),
+);
+
+it.effect(
   "refreshes a linked issue's current state after invalidation without depending on open-list membership",
   () =>
     Effect.gen(function* () {
       let state: "open" | "closed" = "open";
       const service = yield* make([project("healthy", "github.com")], {
         ...provider,
-        getIssue: () =>
+        getIssueSummary: () =>
           Effect.succeed({
             number: 5,
             title: "Linked bug",

@@ -141,6 +141,137 @@ it.effect("reports a typed rate limit with its retry time", () =>
   }),
 );
 
+it.effect("reads an issue body and all comment pages in timeline order", () =>
+  Effect.gen(function* () {
+    const comment = {
+      id: 7,
+      html_url: "https://github.com/acme/web/issues/2#issuecomment-7",
+      user: actor,
+      body: "First reply",
+      created_at: "2026-07-02T01:00:00Z",
+      updated_at: "2026-07-02T01:00:00Z",
+    };
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+        graphql: () => Effect.die("REST only"),
+        rest: ({ path }) =>
+          Effect.succeed({
+            status: 200,
+            truncated: false,
+            invalidUtf8: false,
+            headers: path.endsWith("page=1")
+              ? { link: '<https://api.github.com/next>; rel="next"' }
+              : {},
+            body: JSON.stringify(
+              path.endsWith("issues/2")
+                ? { ...issue, body: "Steps to reproduce" }
+                : path.endsWith("page=1")
+                  ? [comment]
+                  : [{ ...comment, id: 8, body: "Second reply" }],
+            ),
+          }),
+      }),
+    );
+    const detail = yield* provider.getIssue({
+      host: "github.com",
+      cwd: "/repo",
+      repository: "acme/web",
+      number: 2,
+    });
+    expect(detail).toMatchObject({
+      title: "A bug",
+      body: "Steps to reproduce",
+      state: "open",
+      labels: [{ name: "bug", color: "ff0000" }],
+      author: { login: "octocat" },
+    });
+    expect(detail.comments.map(({ id, body }) => ({ id, body }))).toEqual([
+      { id: 7, body: "First reply" },
+      { id: 8, body: "Second reply" },
+    ]);
+    expect(detail.commentsTruncated).toBe(false);
+  }),
+);
+
+it.effect("reports missing issue details distinctly from transient failures", () =>
+  Effect.gen(function* () {
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+        graphql: () => Effect.die("REST only"),
+        rest: () =>
+          Effect.fail(
+            new GitHubApi.GitHubApiNotFoundError({ host: "github.com", operation: "issueDetail" }),
+          ),
+      }),
+    );
+    const result = yield* provider
+      .getIssue({ host: "github.com", cwd: "/repo", repository: "acme/web", number: 9 })
+      .pipe(Effect.result);
+    expect(result).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "IssueOperationError", reason: "not-found" },
+    });
+  }),
+);
+
+it.effect("keeps large timelines bounded and marks remaining comments", () =>
+  Effect.gen(function* () {
+    let pages = 0;
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+        graphql: () => Effect.die("REST only"),
+        rest: ({ path }) => {
+          const comments = path.includes("/comments?");
+          if (comments) pages += 1;
+          return Effect.succeed({
+            status: 200,
+            truncated: false,
+            invalidUtf8: false,
+            headers: comments ? { link: '<https://api.github.com/next>; rel="next"' } : {},
+            body: JSON.stringify(comments ? [] : { ...issue, body: null }),
+          });
+        },
+      }),
+    );
+    const result = yield* provider.getIssue({
+      host: "github.com",
+      cwd: "/repo",
+      repository: "acme/web",
+      number: 2,
+    });
+    expect(result.body).toBe("");
+    expect(result.commentsTruncated).toBe(true);
+    expect(pages).toBe(10);
+  }),
+);
+
+it.effect("refuses pull requests on the issue detail path", () =>
+  Effect.gen(function* () {
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+        graphql: () => Effect.die("REST only"),
+        rest: () =>
+          Effect.succeed({
+            status: 200,
+            headers: {},
+            truncated: false,
+            invalidUtf8: false,
+            body: JSON.stringify({ ...issue, body: "PR body", pull_request: {} }),
+          }),
+      }),
+    );
+    expect(
+      yield* provider
+        .getIssue({ host: "github.com", cwd: "/repo", repository: "acme/web", number: 2 })
+        .pipe(Effect.result),
+    ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-response" } });
+  }),
+);
+
 it.effect(
   "reads a closed issue by number and refuses a PR from GitHub's shared issues endpoint",
   () =>
@@ -173,7 +304,7 @@ it.effect(
         ),
       );
       expect(
-        yield* provider.getIssue({
+        yield* provider.getIssueSummary({
           host: "github.com",
           repository: "acme/web",
           cwd: "/repo",
@@ -183,7 +314,7 @@ it.effect(
       isPullRequest = true;
       expect(
         yield* provider
-          .getIssue({ host: "github.com", repository: "acme/web", cwd: "/repo", number: 2 })
+          .getIssueSummary({ host: "github.com", repository: "acme/web", cwd: "/repo", number: 2 })
           .pipe(Effect.flip),
       ).toMatchObject({ _tag: "IssueOperationError", reason: "invalid-response" });
     }),

@@ -2469,6 +2469,7 @@ const layerWsRpc = (
         [WS_METHODS.issuesSummary]: (input) => threadIssues.summary(input),
         [WS_METHODS.issuesLinkedThreads]: (input) => threadIssues.linkedThreads(input),
         [WS_METHODS.issuesList]: (input) => issues.list(input),
+        [WS_METHODS.issuesDetail]: (input) => issues.detail(input),
         [WS_METHODS.issuesInvalidate]: () => issues.invalidate(),
         [WS_METHODS.issuesSubscribeRefreshes]: () => issues.subscribeRefreshes,
         [WS_METHODS.pullRequestsList]: (input) => pullRequests.list(input),

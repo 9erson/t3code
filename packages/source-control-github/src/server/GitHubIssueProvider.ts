@@ -8,6 +8,7 @@ import {
 import type {
   IssueProviderApi,
   ProviderIssue,
+  ProviderIssueDetail,
 } from "@t3tools/source-control-core/server/IssueProvider";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
@@ -38,6 +39,15 @@ const Row = Schema.Struct({
   updated_at: IsoDateTime,
   pull_request: Schema.optional(Schema.Unknown),
 });
+const DetailRow = Schema.Struct({ ...Row.fields, body: Schema.NullOr(Schema.String) });
+const Comment = Schema.Struct({
+  id: PositiveInt,
+  html_url: TrimmedNonEmptyString,
+  user: Schema.NullOr(Actor),
+  body: Schema.NullOr(Schema.String),
+  created_at: IsoDateTime,
+  updated_at: IsoDateTime,
+});
 const actor = (value: typeof Actor.Type) => ({
   login: value.login,
   name: null,
@@ -56,7 +66,9 @@ const failure = (error: GitHubApi.GitHubApiError) =>
             : error._tag === "GitHubApiRateLimitError" ||
                 error._tag === "SourceControlRateLimitPausedError"
               ? "rate-limited"
-              : "transient",
+              : error._tag === "GitHubApiNotFoundError"
+                ? "not-found"
+                : "transient",
     ...("retryAt" in error && error.retryAt !== undefined ? { retryAt: error.retryAt } : {}),
     cause: error,
   });
@@ -76,8 +88,13 @@ const toIssue = (row: typeof Row.Type): ProviderIssue => ({
 
 export const make = Effect.gen(function* () {
   const api = yield* GitHubApi.GitHubApi;
-  const read = <S extends Schema.Top>(host: string, path: string, schema: S) =>
-    api.rest({ host, path, operation: "listIssues" }).pipe(
+  const read = <S extends Schema.Top>(
+    host: string,
+    path: string,
+    schema: S,
+    operation = "listIssues",
+  ) =>
+    api.rest({ host, path, operation }).pipe(
       Effect.mapError(failure),
       Effect.flatMap((response) =>
         response.truncated || response.invalidUtf8
@@ -102,6 +119,51 @@ export const make = Effect.gen(function* () {
   );
   const provider: IssueProviderApi = {
     kind: "github",
+    getIssue: Effect.fn("GitHubIssueProvider.getIssue")(function* (input) {
+      const repository = input.repository.split("/").map(encodeURIComponent).join("/");
+      const path = `repos/${repository}/issues/${input.number}`;
+      const { value: row } = yield* read(input.host, path, DetailRow, "issueDetail");
+      if (row.pull_request !== undefined)
+        return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
+      const comments: Array<ProviderIssueDetail["comments"][number]> = [];
+      let more = false;
+      // Keep the read bounded; never present a partial timeline as complete.
+      for (let page = 1; page <= 10; page += 1) {
+        const { value, headers } = yield* read(
+          input.host,
+          `${path}/comments?per_page=100&page=${page}`,
+          Schema.Array(Comment),
+          "issueComments",
+        );
+        comments.push(
+          ...value.map((comment) => ({
+            id: comment.id,
+            url: comment.html_url,
+            author: comment.user === null ? null : actor(comment.user),
+            body: comment.body ?? "",
+            createdAt: comment.created_at,
+            updatedAt: comment.updated_at,
+          })),
+        );
+        more = /rel="next"/.test(headers.link ?? "");
+        if (!more) break;
+      }
+      return {
+        number: row.number,
+        title: row.title,
+        url: row.html_url,
+        author: row.user === null ? null : actor(row.user),
+        state: row.state,
+        labels: row.labels.map((label) => ({ name: label.name, color: label.color ?? null })),
+        assignees: row.assignees.map(actor),
+        commentCount: row.comments,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        body: row.body ?? "",
+        comments,
+        commentsTruncated: more,
+      };
+    }),
     getViewer: ({ host }) =>
       api.credential(host).pipe(
         Effect.mapError(failure),
@@ -109,9 +171,14 @@ export const make = Effect.gen(function* () {
           Cache.get(viewers, JSON.stringify([host, fingerprint])),
         ),
       ),
-    getIssue: Effect.fn("GitHubIssueProvider.getIssue")(function* (input) {
+    getIssueSummary: Effect.fn("GitHubIssueProvider.getIssueSummary")(function* (input) {
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
-      const { value } = yield* read(input.host, `repos/${repository}/issues/${input.number}`, Row);
+      const { value } = yield* read(
+        input.host,
+        `repos/${repository}/issues/${input.number}`,
+        Row,
+        "issueSummary",
+      );
       if (value.pull_request !== undefined)
         return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
       return toIssue(value);

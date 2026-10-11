@@ -1,4 +1,10 @@
-import { IssueListInput, IssueListResult, IssueOperationError } from "./issue.ts";
+import {
+  IssueDetail,
+  IssueRef,
+  IssueListInput,
+  IssueListResult,
+  IssueOperationError,
+} from "./issue.ts";
 import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
@@ -528,6 +534,7 @@ export const WS_METHODS = {
   issuesUnlink: "issues.unlink",
   issuesSummary: "issues.summary",
   issuesLinkedThreads: "issues.linkedThreads",
+  issuesDetail: "issues.detail",
   issuesInvalidate: "issues.invalidate",
   issuesSubscribeRefreshes: "issues.subscribeRefreshes",
   pullRequestsList: "pullRequests.list",
@@ -968,6 +975,11 @@ const WsIssuesLinkedThreadsRpc = Rpc.make(WS_METHODS.issuesLinkedThreads, {
 const WsIssuesListRpc = Rpc.make(WS_METHODS.issuesList, {
   payload: IssueListInput,
   success: IssueListResult,
+  error: IssueRpcError,
+});
+const WsIssuesDetailRpc = Rpc.make(WS_METHODS.issuesDetail, {
+  payload: IssueRef,
+  success: IssueDetail,
   error: IssueRpcError,
 });
 const WsIssuesInvalidateRpc = Rpc.make(WS_METHODS.issuesInvalidate, {
@@ -1953,6 +1965,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsIssuesSummaryRpc,
   WsIssuesLinkedThreadsRpc,
   WsIssuesListRpc,
+  WsIssuesDetailRpc,
   WsIssuesInvalidateRpc,
   WsIssuesSubscribeRefreshesRpc,
   WsPullRequestsListRpc,

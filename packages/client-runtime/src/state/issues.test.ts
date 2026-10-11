@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, WS_METHODS } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, WS_METHODS } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Latch from "effect/Latch";
@@ -35,6 +35,8 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
             truncated: false,
             entries: [{ title }],
           })),
+        [WS_METHODS.issuesDetail]: () =>
+          Effect.sync(() => ({ title, body: `Body: ${title}`, comments: [] })),
         [WS_METHODS.issuesSubscribeRefreshes]: () => SubscriptionRef.changes(revision),
         [WS_METHODS.issuesInvalidate]: () => SubscriptionRef.update(revision, (value) => value + 1),
       } as unknown as WsRpcProtocolClient;
@@ -87,6 +89,18 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
         Effect.sync(() => registry.dispose()),
       );
       const list = atoms.list({ environmentId: target.environmentId, input: { state: "open" } });
+      const detail = atoms.detail({
+        environmentId: target.environmentId,
+        input: {
+          projectId: ProjectId.make("project"),
+          host: "github.com",
+          repository: "acme/web",
+          number: 2,
+        },
+      });
+      const unmountDetail = registry.mount(detail);
+      yield* Effect.addFinalizer(() => Effect.sync(unmountDetail));
+      expect((yield* AtomRegistry.getResult(registry, detail)).body).toBe("Body: Original");
       const unmount = registry.mount(list);
       yield* Effect.addFinalizer(() => Effect.sync(unmount));
       expect((yield* AtomRegistry.getResult(registry, list)).entries[0]?.title).toBe("Original");
@@ -110,6 +124,7 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
         else yield* SubscriptionRef.update(revision, (value) => value + 1);
         yield* changed.await;
         expect((yield* AtomRegistry.getResult(registry, list)).entries[0]?.title).toBe(expected);
+        expect((yield* AtomRegistry.getResult(registry, detail)).body).toBe(`Body: ${expected}`);
         stop();
       }
     }),
