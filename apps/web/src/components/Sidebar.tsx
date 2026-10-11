@@ -1849,6 +1849,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             <ThreadIssueChips
               links={thread.issues ?? []}
               threadRef={threadRef}
+              refreshCurrentState={props.isActive}
               onOpen={() => {
                 if (!props.isActive) onThreadActivate(threadRef);
               }}
@@ -2195,6 +2196,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               <ThreadIssueChips
                 links={thread.issues ?? []}
                 threadRef={threadRef}
+                refreshCurrentState={props.isActive}
                 onOpen={() => {
                   if (!props.isActive) onThreadActivate(threadRef);
                 }}

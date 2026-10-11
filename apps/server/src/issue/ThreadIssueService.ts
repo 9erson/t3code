@@ -35,7 +35,7 @@ export const make = Effect.gen(function* () {
   const issues = yield* IssueService.IssueService;
   const summary = issues.summary;
   const dispatch = Effect.fn("ThreadIssueService.dispatch")(
-    function* (input: IssueLinkInput, issue?: IssueListEntry) {
+    function* (input: IssueLinkInput, issue: IssueListEntry | undefined) {
       const key = normalizeThreadIssueKey(input);
       const commandId = CommandId.make(`issue-link:${yield* crypto.randomUUIDv4}`);
       yield* orchestrator.dispatch(
@@ -64,7 +64,7 @@ export const make = Effect.gen(function* () {
       const issue = yield* summary(input);
       yield* dispatch(input, issue);
     }),
-    unlink: (input) => dispatch(input),
+    unlink: (input) => dispatch(input, undefined),
     linkedThreads: Effect.fn("ThreadIssueService.linkedThreads")(
       function* (input) {
         const key = normalizeThreadIssueKey(input);

@@ -753,7 +753,11 @@ export function BranchToolbarBranchSelector({
             }}
           />
         ) : null}
-        <ThreadIssueChips links={serverThread?.issues ?? []} threadRef={threadRef} />
+        <ThreadIssueChips
+          links={serverThread?.issues ?? []}
+          threadRef={threadRef}
+          refreshCurrentState
+        />
         <span
           className="flex min-w-0"
           onMouseDownCapture={(event) => {
