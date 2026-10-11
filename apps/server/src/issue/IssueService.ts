@@ -42,7 +42,10 @@ export class IssueService extends Context.Service<
   IssueService,
   {
     readonly detail: (input: IssueRef) => Effect.Effect<IssueDetail, IssueOperationError>;
-    readonly summary: (input: ThreadIssueKey) => Effect.Effect<IssueListEntry, IssueOperationError>;
+    readonly summary: (
+      input: ThreadIssueKey,
+      options?: { readonly fresh?: boolean },
+    ) => Effect.Effect<IssueListEntry, IssueOperationError>;
     readonly list: (input: IssueListInput) => Effect.Effect<IssueListResult, IssueOperationError>;
     readonly invalidate: () => Effect.Effect<void>;
     readonly subscribeRefreshes: Stream.Stream<number>;
@@ -356,8 +359,10 @@ export const make = Effect.gen(function* () {
         }),
       ),
 
-    summary: (input) =>
-      Cache.get(summaries, encodeSummaryKey([epoch, normalizeThreadIssueKey(input)])),
+    summary: (input, options) =>
+      options?.fresh === true
+        ? summary(input)
+        : Cache.get(summaries, encodeSummaryKey([epoch, normalizeThreadIssueKey(input)])),
     list: (input) =>
       Cache.get(
         cache,

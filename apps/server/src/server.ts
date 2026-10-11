@@ -4,6 +4,7 @@ import * as Clock from "effect/Clock";
 import * as Random from "effect/Random";
 import * as Semaphore from "effect/Semaphore";
 import * as StorageCleanup from "./storageCleanup.ts";
+import * as IssueSyncReactor from "./orchestration-v2/IssueSyncReactor.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
 // @effect-diagnostics nodeBuiltinImport:off
@@ -338,6 +339,11 @@ const layerRepositoryIdentityResolver = Layer.effect(
   }),
 ).pipe(Layer.provide(layerSourceControlProviderRegistry), Layer.provide(ProcessRunner.layer));
 
+const layerIssueService = IssueService.layer.pipe(
+  Layer.provide(IssueProviderRegistry.layer),
+  Layer.provide(IssueReadCache.layer),
+);
+
 const layerPullRequestService = PullRequestService.layer.pipe(
   Layer.provide(PullRequestProviderRegistry.layer),
   // Where the viewed-file marks live for a host that keeps none of its own.
@@ -555,6 +561,15 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   layerThreadPullRequestWorker,
   Layer.effectDiscard(
     Effect.gen(function* () {
+      yield* (yield* IssueSyncReactor.IssueSyncReactor).start();
+    }),
+  ).pipe(
+    Layer.provideMerge(IssueSyncReactor.layer),
+    Layer.provide(layerIssueService),
+    Layer.provide(ProjectionStoreV2.layer),
+  ),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
       const service = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       yield* service.start();
     }),
@@ -719,12 +734,7 @@ const layerMakeRoutes = Layer.mergeAll(
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
 ).pipe(
-  Layer.provide(
-    IssueService.layer.pipe(
-      Layer.provide(IssueProviderRegistry.layer),
-      Layer.provide(IssueReadCache.layer),
-    ),
-  ),
+  Layer.provide(layerIssueService),
   // Both transports consume the same service instance, so caches single-flight across clients
   // and mutations observed on WebSocket invalidate patches subsequently read over HTTP.
   Layer.provide(layerPullRequestService),
