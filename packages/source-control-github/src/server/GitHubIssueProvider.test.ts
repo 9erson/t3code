@@ -1,3 +1,4 @@
+import type { IssueOperationError } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
@@ -468,7 +469,7 @@ it.effect.each(writeFailureCases)(
               : Effect.fail(error),
         }),
       );
-      const result = yield* provider[method]({
+      const response: Effect.Effect<unknown, IssueOperationError> = provider[method]({
         host: "ghe.example",
         cwd: "/repo",
         repository: "acme/web",
@@ -476,7 +477,8 @@ it.effect.each(writeFailureCases)(
         body: "Confirmed",
         state: "closed",
         labels: ["bug"],
-      }).pipe(Effect.result);
+      });
+      const result = yield* response.pipe(Effect.result);
       expect(result).toMatchObject({
         _tag: "Failure",
         failure: { host: "ghe.example", reason, cause: error },
@@ -503,7 +505,7 @@ it.effect.each(writes)("rejects an unreadable $method response", (method) =>
           }),
       }),
     );
-    const result = yield* provider[method]({
+    const response: Effect.Effect<unknown, IssueOperationError> = provider[method]({
       host: "github.com",
       cwd: "/repo",
       repository: "acme/web",
@@ -511,7 +513,8 @@ it.effect.each(writes)("rejects an unreadable $method response", (method) =>
       body: "Confirmed",
       state: "closed",
       labels: ["bug"],
-    }).pipe(Effect.result);
+    });
+    const result = yield* response.pipe(Effect.result);
     expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-response" } });
   }),
 );

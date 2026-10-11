@@ -213,7 +213,7 @@ it.effect.each(writeCases)(
         ).toEqual(optimistic);
         expect(registry.get(rows).waiting).toBe(true);
         release();
-        const result = yield* Effect.promise(() => write);
+        const result = yield* Effect.promise(async () => await write);
         expect(result._tag).toBe(succeeds ? "Success" : "Failure");
         const settled = yield* AtomRegistry.getResult(registry, panel);
         expect(expectedWrite(settled, method)).toEqual(
