@@ -12,6 +12,7 @@ import {
   PullRequestMarkdownContext,
 } from "../pullRequest/PullRequestMarkdown";
 import { PullRequestLabelChip } from "../pullRequest/pullRequestPresentation";
+import { IssueDetailActions } from "./IssueDetailActions";
 import type { IssueSelection } from "./issueSelection.logic";
 import { useWorkOnIssue } from "./useWorkOnIssue";
 
@@ -153,7 +154,9 @@ export function IssueDetailPanel({
                     <article key={comment.id} className="space-y-2 rounded-md border p-3">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span className="font-medium text-foreground">
-                          {comment.author?.login ?? "Unknown author"}
+                          {comment.id === -1
+                            ? "You · Sending…"
+                            : (comment.author?.login ?? "Unknown author")}
                         </span>
                         <a
                           href={comment.url}
@@ -187,6 +190,11 @@ export function IssueDetailPanel({
                   </p>
                 ) : null}
               </section>
+              <IssueDetailActions
+                key={`${environmentId}/${projectId}/${host}/${repository}/${number}`}
+                selection={selection}
+                detail={detail}
+              />
             </div>
           </PullRequestMarkdownContext>
         ) : (

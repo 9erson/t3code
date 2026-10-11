@@ -1,9 +1,16 @@
+import type { IssueOperationError } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as GitHubApi from "./GitHubApi.ts";
 import * as GitHubIssueProvider from "./GitHubIssueProvider.ts";
+
+const decodeStateBody = Schema.decodeUnknownSync(Schema.Struct({ state: Schema.String }));
+const decodeLabelsBody = Schema.decodeUnknownSync(
+  Schema.Struct({ labels: Schema.Array(Schema.String) }),
+);
 
 const actor = { login: "octocat", avatar_url: "https://github.com/octocat.png" };
 const issue = {
@@ -269,6 +276,246 @@ it.effect("refuses pull requests on the issue detail path", () =>
         .getIssue({ host: "github.com", cwd: "/repo", repository: "acme/web", number: 2 })
         .pipe(Effect.result),
     ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-response" } });
+  }),
+);
+
+it.effect("posts a comment and returns the GitHub timeline entry", () =>
+  Effect.gen(function* () {
+    const requests: GitHubApi.GitHubRestInput[] = [];
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+        graphql: () => Effect.die("REST only"),
+        rest: (request) => {
+          requests.push(request);
+          return Effect.succeed({
+            status: 201,
+            headers: {},
+            truncated: false,
+            invalidUtf8: false,
+            body: JSON.stringify({
+              id: 42,
+              html_url: issue.html_url + "#issuecomment-42",
+              user: actor,
+              body: "Thanks for reporting",
+              created_at: issue.updated_at,
+              updated_at: issue.updated_at,
+            }),
+          });
+        },
+      }),
+    );
+    const result = yield* provider.comment({
+      host: "ghe.example",
+      repository: "acme/web",
+      cwd: "/repo",
+      number: 2,
+      body: "Thanks for reporting",
+    });
+    expect(result).toMatchObject({
+      id: 42,
+      body: "Thanks for reporting",
+      author: { login: "octocat" },
+    });
+    expect(requests).toEqual([
+      {
+        host: "ghe.example",
+        operation: "issueComment",
+        method: "POST",
+        path: "repos/acme/web/issues/2/comments",
+        body: { body: "Thanks for reporting" },
+      },
+    ]);
+  }),
+);
+
+it.effect("closes and reopens issues using the requested state", () =>
+  Effect.gen(function* () {
+    const requests: GitHubApi.GitHubRestInput[] = [];
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.die("unused"),
+        graphql: () => Effect.die("REST only"),
+        rest: (request) => {
+          requests.push(request);
+          return Effect.succeed({
+            status: 200,
+            headers: {},
+            truncated: false,
+            invalidUtf8: false,
+            body: JSON.stringify({
+              ...issue,
+              state: decodeStateBody(request.body).state,
+            }),
+          });
+        },
+      }),
+    );
+    for (const state of ["closed", "open"] as const) {
+      const result = yield* provider.setState({
+        host: "github.com",
+        repository: "acme/web",
+        cwd: "/repo",
+        number: 2,
+        state,
+      });
+      expect(result).toBe(state);
+    }
+    expect(requests.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+      { method: "PATCH", path: "repos/acme/web/issues/2", body: { state: "closed" } },
+      { method: "PATCH", path: "repos/acme/web/issues/2", body: { state: "open" } },
+    ]);
+  }),
+);
+
+it.effect(
+  "offers existing repository labels across pages and replaces or clears issue labels",
+  () =>
+    Effect.gen(function* () {
+      const requests: GitHubApi.GitHubRestInput[] = [];
+      const provider = yield* GitHubIssueProvider.make.pipe(
+        Effect.provideService(GitHubApi.GitHubApi, {
+          credential: () => Effect.die("unused"),
+          graphql: () => Effect.die("REST only"),
+          rest: (request) => {
+            requests.push(request);
+            const first = request.path === "repos/acme/web/labels?per_page=100&page=1";
+            const labels =
+              request.method === "PUT"
+                ? decodeLabelsBody(request.body).labels.map((name) => ({ name, color: "ff0000" }))
+                : [{ name: first ? "bug" : "help wanted", color: "ff0000" }];
+            return Effect.succeed({
+              status: 200,
+              headers: first ? { link: '<https://api.github.com/next>; rel="next"' } : {},
+              truncated: false,
+              invalidUtf8: false,
+              body: JSON.stringify(labels),
+            });
+          },
+        }),
+      );
+      const input = { host: "github.com", repository: "acme/web", cwd: "/repo", number: 2 };
+      const candidates = yield* provider.labelCandidates(input);
+      expect(candidates.map((label) => label.name)).toEqual(["bug", "help wanted"]);
+      const labels = yield* provider.setLabels({ ...input, labels: ["BUG"] });
+      expect(labels).toEqual([{ name: "bug", color: "ff0000" }]);
+      const cleared = yield* provider.setLabels({ ...input, labels: [] });
+      expect(cleared).toEqual([]);
+      const invalid = yield* provider
+        .setLabels({ ...input, labels: ["new label"] })
+        .pipe(Effect.result);
+      expect(invalid).toMatchObject({ _tag: "Failure", failure: { reason: "label-not-found" } });
+      expect(
+        requests
+          .filter((request) => request.method === "PUT")
+          .map(({ path, body }) => ({ path, body })),
+      ).toEqual([
+        { path: "repos/acme/web/issues/2/labels", body: { labels: ["bug"] } },
+        { path: "repos/acme/web/issues/2/labels", body: { labels: [] } },
+      ]);
+    }),
+);
+
+const writes = ["comment", "setState", "setLabels", "labelCandidates"] as const;
+const writeFailures = [
+  {
+    reason: "authentication",
+    error: new GitHubApi.GitHubApiAuthenticationError({
+      host: "ghe.example",
+      operation: "issueWrite",
+    }),
+  },
+  {
+    reason: "rate-limited",
+    error: new GitHubApi.GitHubApiRateLimitError({
+      host: "ghe.example",
+      operation: "issueWrite",
+      retryAt: 1234,
+    }),
+  },
+  {
+    reason: "not-found",
+    error: new GitHubApi.GitHubApiNotFoundError({ host: "ghe.example", operation: "issueWrite" }),
+  },
+  {
+    reason: "transient",
+    error: new GitHubApi.GitHubApiResponseError({
+      host: "ghe.example",
+      operation: "issueWrite",
+      status: 403,
+    }),
+  },
+];
+const writeFailureCases = writes.flatMap((method) =>
+  writeFailures.map((failure) => ({ method, ...failure })),
+);
+it.effect.each(writeFailureCases)(
+  "maps $method failures to the typed $reason issue error",
+  ({ method, error, reason }) =>
+    Effect.gen(function* () {
+      const provider = yield* GitHubIssueProvider.make.pipe(
+        Effect.provideService(GitHubApi.GitHubApi, {
+          credential: () => Effect.die("unused"),
+          graphql: () => Effect.die("REST only"),
+          rest: (request) =>
+            method === "setLabels" && request.path.includes("/labels?")
+              ? Effect.succeed({
+                  status: 200,
+                  headers: {},
+                  truncated: false,
+                  invalidUtf8: false,
+                  body: '[{"name":"bug","color":"ff0000"}]',
+                })
+              : Effect.fail(error),
+        }),
+      );
+      const response: Effect.Effect<unknown, IssueOperationError> = provider[method]({
+        host: "ghe.example",
+        cwd: "/repo",
+        repository: "acme/web",
+        number: 2,
+        body: "Confirmed",
+        state: "closed",
+        labels: ["bug"],
+      });
+      const result = yield* response.pipe(Effect.result);
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { host: "ghe.example", reason, cause: error },
+      });
+    }),
+);
+
+it.effect.each(writes)("rejects an unreadable $method response", (method) =>
+  Effect.gen(function* () {
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.die("unused"),
+        graphql: () => Effect.die("REST only"),
+        rest: (request) =>
+          Effect.succeed({
+            status: 200,
+            headers: {},
+            truncated: false,
+            invalidUtf8: false,
+            body:
+              method === "setLabels" && request.path.includes("/labels?")
+                ? '[{"name":"bug"}]'
+                : "{}",
+          }),
+      }),
+    );
+    const response: Effect.Effect<unknown, IssueOperationError> = provider[method]({
+      host: "github.com",
+      cwd: "/repo",
+      repository: "acme/web",
+      number: 2,
+      body: "Confirmed",
+      state: "closed",
+      labels: ["bug"],
+    });
+    const result = yield* response.pipe(Effect.result);
+    expect(result).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-response" } });
   }),
 );
 

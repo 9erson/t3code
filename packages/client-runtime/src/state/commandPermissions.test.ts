@@ -289,6 +289,41 @@ it.effect("rejects protected unary and streamed RPCs outside a guarded command",
   }),
 );
 
+it.effect.each([
+  WS_METHODS.issuesComment,
+  WS_METHODS.issuesSetState,
+  WS_METHODS.issuesSetLabels,
+  WS_METHODS.issuesLabelCandidates,
+])("uses the destination source-control permission for %s availability and execution", (method) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const command = createCommandPermissions(runtime, method);
+      registry.set(sessions(env), AsyncResult.success(grant(false)));
+      expect(registry.get(command.permissionAtom(env))).toBe(false);
+      expect(yield* command.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+        requiredPermission: AuthSourceControlWriteScope,
+      });
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthSourceControlWriteScope],
+          permissions: [AuthSourceControlWriteScope],
+        }),
+      );
+      expect(registry.get(command.permissionAtom(env))).toBe(true);
+      yield* command.authorize(registry, env);
+      registry.set(sessions(other), AsyncResult.success(grant(false)));
+      expect(registry.get(command.permissionAtom(other))).toBe(false);
+      registry.set(sessions(env), AsyncResult.success(grant(false)));
+      expect(yield* command.authorize(registry, env).pipe(Effect.flip)).toMatchObject({
+        requiredPermission: AuthSourceControlWriteScope,
+      });
+    }),
+  ),
+);
+
 it.effect("issue link and unlink commands require the destination source control grant", () =>
   Effect.scoped(
     Effect.gen(function* () {
