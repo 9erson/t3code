@@ -1,14 +1,13 @@
-import {
-  normalizeThreadIssueKey,
-  threadIssueKeysEqual,
-  type ThreadIssueKey,
-  type EnvironmentId,
-  type IssueRef,
-} from "@t3tools/contracts";
+import type { EnvironmentId, IssueRef } from "@t3tools/contracts";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { findProjectForChangeRequest } from "~/lib/openPullRequestLink";
 import type { IssueSelection } from "./issueSelection.logic";
+import {
+  normalizeThreadIssueKey,
+  threadIssueKeysEqual,
+  type ThreadIssueKey,
+} from "@t3tools/contracts";
 
 /** Accept only an issue URL or a number in the thread's own GitHub repository. */
 export function resolveIssueReference(
