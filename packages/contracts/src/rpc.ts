@@ -1,4 +1,7 @@
 import {
+  IssueCreateInput,
+  IssueAssigneeCandidatesInput,
+  IssueActor,
   IssueDetail,
   IssueComment,
   IssueCommentInput,
@@ -536,6 +539,8 @@ export const WS_METHODS = {
   cloudInstallRelayClient: "cloud.installRelayClient",
 
   // Pull request methods
+  issuesCreate: "issues.create",
+  issuesAssigneeCandidates: "issues.assigneeCandidates",
   issuesComment: "issues.comment",
   issuesSetState: "issues.setState",
   issuesSetLabels: "issues.setLabels",
@@ -963,6 +968,16 @@ const WsServerGetBackgroundPolicyRpc = Rpc.make(WS_METHODS.serverGetBackgroundPo
 });
 
 const IssueRpcError = Schema.Union([IssueOperationError, EnvironmentAuthorizationError]);
+const WsIssuesCreateRpc = Rpc.make(WS_METHODS.issuesCreate, {
+  payload: IssueCreateInput,
+  success: IssueListEntry,
+  error: IssueRpcError,
+});
+const WsIssuesAssigneeCandidatesRpc = Rpc.make(WS_METHODS.issuesAssigneeCandidates, {
+  payload: IssueAssigneeCandidatesInput,
+  success: Schema.Array(IssueActor),
+  error: IssueRpcError,
+});
 const WsIssuesCommentRpc = Rpc.make(WS_METHODS.issuesComment, {
   payload: IssueCommentInput,
   success: IssueComment,
@@ -1991,6 +2006,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetBackgroundPolicyRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
+  WsIssuesCreateRpc,
+  WsIssuesAssigneeCandidatesRpc,
   WsIssuesCommentRpc,
   WsIssuesSetStateRpc,
   WsIssuesSetLabelsRpc,

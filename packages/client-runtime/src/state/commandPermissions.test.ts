@@ -8,6 +8,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { vi } from "vite-plus/test";
 import {
   AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   ThreadId,
@@ -290,6 +291,7 @@ it.effect("rejects protected unary and streamed RPCs outside a guarded command",
 );
 
 it.effect.each([
+  WS_METHODS.issuesCreate,
   WS_METHODS.issuesComment,
   WS_METHODS.issuesSetState,
   WS_METHODS.issuesSetLabels,
@@ -349,6 +351,30 @@ it.effect("issue link and unlink commands require the destination source control
         registry.set(sessions(other), AsyncResult.success(grant(false)));
         expect(registry.get(command.permissionAtom(other))).toBe(false);
       }
+    }),
+  ),
+);
+
+it.effect("allows repository assignee candidates with the destination read grant", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const candidates = createCommandPermissions(runtime, WS_METHODS.issuesAssigneeCandidates);
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthOrchestrationReadScope],
+          permissions: [AuthOrchestrationReadScope],
+        }),
+      );
+      expect(registry.get(candidates.permissionAtom(env))).toBe(true);
+      yield* candidates.authorize(registry, env);
+      registry.set(sessions(other), AsyncResult.success(grant(false)));
+      expect(registry.get(candidates.permissionAtom(other))).toBe(false);
+      expect(yield* candidates.authorize(registry, other).pipe(Effect.flip)).toMatchObject({
+        requiredPermission: AuthOrchestrationReadScope,
+      });
     }),
   ),
 );

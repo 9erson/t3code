@@ -280,6 +280,14 @@ export function createIssueEnvironmentAtoms<R, E>(
     ),
     writeStatus,
     labelCandidates,
+    assigneeCandidates: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:issues:assignee-candidates",
+      tag: WS_METHODS.issuesAssigneeCandidates,
+    }),
+    create: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:issues:create",
+      tag: WS_METHODS.issuesCreate,
+    }),
     setState: {
       ...stateCommand,
       ...optimistic(

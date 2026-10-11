@@ -1,4 +1,7 @@
 import type {
+  IssueCreateInput,
+  IssueActor,
+  IssueAssigneeCandidatesInput,
   IssueDetail,
   IssueComment,
   IssueCommentInput,
@@ -23,6 +26,12 @@ export type ProviderIssue = Omit<
 export type ProviderIssueDetail = ProviderIssue &
   Pick<IssueDetail, "body" | "comments" | "commentsTruncated">;
 export interface IssueProviderApi {
+  readonly create: (
+    input: Omit<IssueCreateInput, "projectId"> & { readonly cwd: string },
+  ) => Effect.Effect<ProviderIssue, IssueOperationError>;
+  readonly assigneeCandidates: (
+    input: Omit<IssueAssigneeCandidatesInput, "projectId"> & { readonly cwd: string },
+  ) => Effect.Effect<ReadonlyArray<IssueActor>, IssueOperationError>;
   readonly labelCandidates: (
     input: Omit<IssueLabelCandidatesInput, "projectId"> & { readonly cwd: string },
   ) => Effect.Effect<ReadonlyArray<IssueLabel>, IssueOperationError>;

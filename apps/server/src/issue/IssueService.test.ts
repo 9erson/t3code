@@ -53,6 +53,8 @@ const projects = [
   project("local"),
 ];
 const provider: IssueProviderApi = {
+  create: () => Effect.die("No create fixture"),
+  assigneeCandidates: () => Effect.die("No assignee fixture"),
   comment: () => Effect.die("No comment fixture"),
   setState: () => Effect.die("No state fixture"),
   setLabels: () => Effect.die("No labels fixture"),
@@ -596,4 +598,89 @@ it.effect(
       });
       expect(result.nextCursors).toEqual({ "ghe.example acme/broken": "4:9" });
     }),
+);
+
+it.effect("creates on the selected project's repository and revalidates the cached list", () =>
+  Effect.gen(function* () {
+    let created = false;
+    const writes: GitHubApi.GitHubRestInput[] = [];
+    const row = {
+      number: 9,
+      title: "New bug",
+      html_url: "https://github.com/acme/healthy/issues/9",
+      user: null,
+      state: "open",
+      labels: [],
+      assignees: [],
+      comments: 0,
+      created_at: "2026-07-02T00:00:00Z",
+      updated_at: "2026-07-02T00:00:00Z",
+    };
+    const github = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+        graphql: () => Effect.die("REST only"),
+        rest: (request) => {
+          if (request.method === "POST") {
+            created = true;
+            writes.push(request);
+          }
+          return Effect.succeed({
+            status: 200,
+            headers: {},
+            truncated: false,
+            invalidUtf8: false,
+            body: JSON.stringify(
+              request.path === "user"
+                ? { login: "octocat" }
+                : request.path.includes("/assignees?")
+                  ? [{ login: "octocat" }]
+                  : request.method === "POST"
+                    ? row
+                    : created
+                      ? [row]
+                      : [],
+            ),
+          });
+        },
+      }),
+    );
+    const service = yield* make([projects[0]!], github);
+    const input = {
+      projectId: projects[0]!.id,
+      host: "github.com",
+      repository: "acme/healthy",
+      title: "New bug",
+      body: "## Steps\nReproduce",
+      labels: [],
+      assignees: [],
+    };
+    expect((yield* service.list({ state: "open" })).entries).toEqual([]);
+    expect(yield* service.assigneeCandidates(input)).toEqual([
+      { login: "octocat", name: null, avatarUrl: null },
+    ]);
+    const result = yield* service.create(input);
+    expect(result).toMatchObject({
+      projectId: projects[0]!.id,
+      projectTitle: "healthy",
+      provider: "github",
+      repository: "acme/healthy",
+      number: 9,
+    });
+    expect((yield* service.list({ state: "open" })).entries.map((issue) => issue.number)).toEqual([
+      9,
+    ]);
+    expect(
+      yield* service.create({ ...input, repository: "acme/old" }).pipe(Effect.flip),
+    ).toMatchObject({ reason: "not-found" });
+    expect(yield* service.create({ ...input, title: " " }).pipe(Effect.flip)).toMatchObject({
+      reason: "invalid-input",
+    });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      host: "github.com",
+      path: "repos/acme/healthy/issues",
+      body: { title: "New bug", body: "## Steps\nReproduce", labels: [], assignees: [] },
+    });
+  }),
 );

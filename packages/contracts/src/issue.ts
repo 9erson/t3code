@@ -17,6 +17,7 @@ export const IssueActor = Schema.Struct({
   name: Schema.NullOr(Schema.String),
   avatarUrl: Schema.NullOr(Schema.String),
 });
+export type IssueActor = typeof IssueActor.Type;
 export const IssueLabel = Schema.Struct({
   name: TrimmedNonEmptyString,
   color: Schema.NullOr(Schema.String),
@@ -68,6 +69,20 @@ export const IssueLabelCandidatesInput = Schema.Struct({
   repository: TrimmedNonEmptyString,
 });
 export type IssueLabelCandidatesInput = typeof IssueLabelCandidatesInput.Type;
+export const IssueAssigneeCandidatesInput = IssueLabelCandidatesInput;
+export type IssueAssigneeCandidatesInput = typeof IssueAssigneeCandidatesInput.Type;
+export const IssueCreateInput = Schema.Struct({
+  ...IssueLabelCandidatesInput.fields,
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  body: Schema.String.check(Schema.isMaxLength(65536)),
+  labels: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(100))).check(
+    Schema.isMaxLength(100),
+  ),
+  assignees: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(100))).check(
+    Schema.isMaxLength(10),
+  ),
+});
+export type IssueCreateInput = typeof IssueCreateInput.Type;
 export const IssueSetLabelsInput = Schema.Struct({
   ...IssueRef.fields,
   labels: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(100))).check(
@@ -145,6 +160,8 @@ export const IssueFailureReason = Schema.Literals([
   "repository-unavailable",
   "not-found",
   "label-not-found",
+  "assignee-not-found",
+  "invalid-input",
   "invalid-query",
 ]);
 export class IssueOperationError extends Schema.TaggedError<IssueOperationError>()(
@@ -169,6 +186,10 @@ export class IssueOperationError extends Schema.TaggedError<IssueOperationError>
         return `GitHub${this.rateLimitResource === "search" ? " search" : ""} rate limit reached for ${this.host}. Wait until the limit resets and refresh.`;
       case "provider-unsupported":
         return "This host cannot be browsed here yet.";
+      case "assignee-not-found":
+        return "One of the selected assignees is no longer available in this repository. Reload assignees and try again.";
+      case "invalid-input":
+        return "Check the issue title (1–256 characters), body (up to 65,536 characters), labels and assignees, then try again.";
       case "label-not-found":
         return "One of the selected labels no longer exists in this repository. Reload labels and try again.";
       case "repository-unavailable":

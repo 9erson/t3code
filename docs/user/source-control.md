@@ -212,6 +212,13 @@ existing labels. Your connection needs source-control write permission. Changes 
 a failed request restores the previous state and shows an error. An unsent comment stays available
 so you can retry.
 
+Use **Create new issue** on the Issues page to choose a project, enter a title and Markdown
+body, and select existing repository labels and assignees. Filing requires source-control write
+permission in that project's environment. A failed request keeps your draft so you can fix the
+reported problem and retry. **Keep draft** closes the composer without clearing it; **Discard
+draft** clears it. Switching projects keeps the title and body and clears repository-specific
+labels and assignees.
+
 GitHub issue URLs in chat show issue context on hover and open the detail panel when the repository
 is configured in that environment. ⌘/Ctrl-click opens the original URL in your browser.
 
