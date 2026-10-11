@@ -58,7 +58,7 @@ const runtime = Layer.mergeAll(
     ProviderAdapterRegistry.layerFromAdapters([adapter]),
     { databaseLayer: database, runEffectWorker: false },
   ),
-);
+).pipe(Layer.provideMerge(NodeServices.layer));
 const key = { host: "github.com", repository: "owner/repo", number: 7 };
 const initial: ThreadIssueSnapshot = {
   title: "Fix issue",
@@ -185,7 +185,7 @@ it.effect("refreshes linked thread chips from persisted issue events without wak
       );
       assert.deepStrictEqual(yield* Ref.get(fixture.calls), [7]);
       assert.deepStrictEqual((yield* projections.getThreadProjection(threadId))?.runs, []);
-    }).pipe(Effect.provide(runtime), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(runtime)),
   ),
 );
 
@@ -212,7 +212,7 @@ it.effect("observes externally reopened issues and reads a shared link once per 
       yield* Queue.take(fixture.reads);
       yield* fixture.reactor.drain;
       assert.equal((yield* states(first)).length, 3);
-    }).pipe(Effect.provide(runtime), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(runtime)),
   ),
 );
 
@@ -242,7 +242,7 @@ it.effect("continues refreshing other linked issues when one host read fails", (
         ["open", "open"],
         ["open", "closed"],
       ]);
-    }).pipe(Effect.provide(runtime), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(runtime)),
   ),
 );
 
@@ -254,11 +254,11 @@ it.effect("refreshes from the host even when a recent client summary is cached",
       const threadId = yield* createThread("cached");
       yield* fixture.service.summary(key);
       yield* Queue.take(fixture.reads);
-      yield* Ref.set(current, { ...initial, state: "closed" });
+      yield* Ref.set(current, { ...initial, state: "closed" as const });
       yield* fixture.reactor.start();
       yield* fixture.reactor.drain;
       assert.deepStrictEqual(yield* states(threadId), [["open"], ["closed"]]);
-    }).pipe(Effect.provide(runtime), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(runtime)),
   ),
 );
 
@@ -289,7 +289,7 @@ it.effect("does not resurrect a link removed while its host read is in flight", 
         yield* (yield* ProjectionStore.ProjectionStoreV2).getThreadsWithIssues(),
         [],
       );
-    }).pipe(Effect.provide(runtime), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(runtime)),
   ),
 );
 
@@ -310,7 +310,7 @@ it.effect("parks startup until activation and drains its initial sweep exactly o
         assert.deepStrictEqual(yield* states(threadId), [["open"], ["closed"]]);
         assert.deepStrictEqual(yield* Ref.get(fixture.calls), [7]);
       }).pipe(Effect.provideService(ServerActivation, Deferred.await(activation)));
-    }).pipe(Effect.provide(runtime), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(runtime)),
   ),
 );
 
@@ -338,6 +338,6 @@ it.effect("bounds concurrent host reads even when many linked issues are due", (
       assert.isAtMost(observed.maximum, 5);
       assert.equal((yield* Ref.get(fixture.calls)).length, 12);
       assert.deepStrictEqual(yield* states(ThreadId.make("bounded:12")), [["open"], ["closed"]]);
-    }).pipe(Effect.provide(runtime), Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(runtime)),
   ),
 );
