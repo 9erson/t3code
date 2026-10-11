@@ -1,6 +1,5 @@
 import {
   IssueOperationError,
-  type IssueDetail,
   type IssueComment,
   type IssueCommentInput,
   type IssueLabel,
@@ -9,8 +8,12 @@ import {
   type IssueSetStateInput,
   type IssueState,
   IssueRef,
+  type IssueDetail,
   type IssueListInput,
   type IssueListResult,
+  type IssueListEntry,
+  ThreadIssueKey,
+  normalizeThreadIssueKey,
   type SourceControlProviderKind,
   pullRequestHostOf,
 } from "@t3tools/contracts";
@@ -23,9 +26,9 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
+import * as Schema from "effect/Schema";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
@@ -35,6 +38,12 @@ import * as IssueProviderRegistry from "./IssueProviderRegistry.ts";
 const detailKeyCodec = Schema.fromJsonString(IssueRef);
 const encodeDetailKey = Schema.encodeSync(detailKeyCodec);
 const decodeDetailKey = Schema.decodeSync(detailKeyCodec);
+
+const summaryKey = Schema.fromJsonString(Schema.Tuple([Schema.Number, ThreadIssueKey]));
+const encodeSummaryKey = Schema.encodeSync(summaryKey);
+const decodeSummaryKey = Schema.decodeSync(summaryKey);
+
+const isIssueOperationError = Schema.is(IssueOperationError);
 
 export class IssueService extends Context.Service<
   IssueService,
@@ -52,6 +61,7 @@ export class IssueService extends Context.Service<
       input: IssueCommentInput,
     ) => Effect.Effect<IssueComment, IssueOperationError>;
     readonly detail: (input: IssueRef) => Effect.Effect<IssueDetail, IssueOperationError>;
+    readonly summary: (input: ThreadIssueKey) => Effect.Effect<IssueListEntry, IssueOperationError>;
     readonly list: (input: IssueListInput) => Effect.Effect<IssueListResult, IssueOperationError>;
     readonly invalidate: () => Effect.Effect<void>;
     readonly subscribeRefreshes: Stream.Stream<number>;
@@ -298,6 +308,54 @@ export const make = Effect.gen(function* () {
       return yield* new IssueOperationError({ host, reason: "provider-unsupported" });
     return { project, api, host, repository, kind };
   });
+  const summary = Effect.fn("IssueService.summary")(
+    function* (input: ThreadIssueKey) {
+      const key = normalizeThreadIssueKey(input);
+      const rows = yield* projects.listShells();
+      for (const project of rows) {
+        const identity =
+          project.repositoryIdentity == null || project.repositoryIdentity.provider === "unknown"
+            ? ((yield* identities.resolve(project.workspaceRoot)) ??
+              project.repositoryIdentity ??
+              null)
+            : project.repositoryIdentity;
+        const repository = sourceControlRepositorySelector(identity);
+        if (
+          identity == null ||
+          repository?.toLowerCase() !== key.repository ||
+          pullRequestHostOf(identity, "github") !== key.host
+        )
+          continue;
+        if (identity.provider !== "github")
+          return yield* new IssueOperationError({ host: key.host, reason: "provider-unsupported" });
+        const provider = registry.get("github");
+        if (provider === null)
+          return yield* new IssueOperationError({ host: key.host, reason: "provider-unsupported" });
+        const issue = yield* provider.getIssueSummary({ ...key, cwd: project.workspaceRoot });
+        return {
+          ...issue,
+          ...key,
+          provider: "github" as const,
+          projectId: project.id,
+          projectTitle: project.title,
+        };
+      }
+      return yield* new IssueOperationError({ host: key.host, reason: "repository-unavailable" });
+    },
+    (effect, input) =>
+      effect.pipe(
+        Effect.mapError((cause) =>
+          isIssueOperationError(cause)
+            ? cause
+            : new IssueOperationError({ host: input.host, reason: "transient", cause }),
+        ),
+      ),
+  );
+
+  const summaries = yield* Cache.makeWith((key: string) => summary(decodeSummaryKey(key)[1]), {
+    capacity: 128,
+    timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.seconds(30) : Duration.zero),
+  });
   const details = yield* Cache.makeWith(
     Effect.fn("IssueService.detail")(function* (key: string) {
       const input = decodeDetailKey(key);
@@ -329,6 +387,7 @@ export const make = Effect.gen(function* () {
     yield* readCache.invalidate;
     epoch += 1;
     yield* Cache.invalidateAll(cache);
+    yield* Cache.invalidateAll(summaries);
     yield* Cache.invalidateAll(details);
     yield* SubscriptionRef.update(refreshes, (value) => value + 1);
   });
@@ -375,6 +434,9 @@ export const make = Effect.gen(function* () {
           number: input.number,
         }),
       ),
+
+    summary: (input) =>
+      Cache.get(summaries, encodeSummaryKey([epoch, normalizeThreadIssueKey(input)])),
     list: (input) =>
       Cache.get(
         cache,

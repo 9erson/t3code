@@ -106,6 +106,8 @@ export function shouldPublishAgentAwarenessEvent(
     case "subagent.updated":
     case "provider-thread.updated":
       return true;
+    case "thread.issues-updated":
+      return false;
     case "thread.settled":
     case "thread.unsettled":
     case "thread.snoozed":

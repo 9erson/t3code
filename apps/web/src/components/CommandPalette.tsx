@@ -1,4 +1,6 @@
-"use client";
+import { issueEnvironment } from "~/state/issues";
+import { openLinkIssueDialog } from "./issue/LinkIssueDialog";
+("use client");
 
 import { readIssueListPreferences } from "./issue/issueListPreferences";
 
@@ -776,6 +778,9 @@ function OpenCommandPaletteDialog(props: {
         ? scopeThreadRef(activeThread.environmentId, activeThread.id)
         : null;
   const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(referenceThreadRef);
+  const canLinkIssue = useAtomValue(
+    issueEnvironment.link.permissionAtom(activeThread?.environmentId ?? null),
+  );
   const activeThreadServerConfig = useServerConfigs().get(
     activeThread?.environmentId ?? ("" as EnvironmentId),
   );
@@ -1977,6 +1982,31 @@ function OpenCommandPaletteDialog(props: {
       icon: <LinkIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "thread.copyReference",
       run: copyActiveThreadReference,
+    });
+  }
+
+  if (activeThread !== null && activeThreadServerConfig?.environment.capabilities.issues === true) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    actionItems.push({
+      kind: "action",
+      value: "action:link-issue",
+      disabled: !canLinkIssue,
+      searchTerms: ["link", "issue", "attach"],
+      title: "Link issue to thread",
+      icon: <CircleDotIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        openLinkIssueDialog(threadRef);
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:linked-issues",
+      searchTerms: ["linked", "issues"],
+      title: "Show linked issues",
+      icon: <CircleDotIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useRightPanelStore.getState().open(threadRef, "issues");
+      },
     });
   }
 

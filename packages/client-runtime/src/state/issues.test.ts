@@ -53,6 +53,7 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
     Effect.gen(function* () {
       const revision = yield* SubscriptionRef.make(0);
       let title = "Original";
+      let state: "open" | "closed" = "open";
       const client = {
         [WS_METHODS.issuesList]: (input: { cursors?: Record<string, string>; host?: string }) =>
           input.host === "broken"
@@ -87,6 +88,7 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
               })),
         [WS_METHODS.issuesDetail]: () =>
           Effect.sync(() => ({ ...fixture, title, body: `Body: ${title}`, comments: [] })),
+        [WS_METHODS.issuesSummary]: () => Effect.sync(() => ({ title, state })),
         [WS_METHODS.issuesSubscribeRefreshes]: () => SubscriptionRef.changes(revision),
         [WS_METHODS.issuesInvalidate]: () => SubscriptionRef.update(revision, (value) => value + 1),
       } as unknown as WsRpcProtocolClient;
@@ -151,6 +153,13 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
       const unmountDetail = registry.mount(detail);
       yield* Effect.addFinalizer(() => Effect.sync(unmountDetail));
       expect((yield* AtomRegistry.getResult(registry, detail)).body).toBe("Body: Original");
+      const summary = atoms.summary({
+        environmentId: target.environmentId,
+        input: { host: "github.com", repository: "acme/web", number: 2 },
+      });
+      const unmountSummary = registry.mount(summary);
+      yield* Effect.addFinalizer(() => Effect.sync(unmountSummary));
+      expect((yield* AtomRegistry.getResult(registry, summary)).state).toBe("open");
       const unmount = registry.mount(list);
       yield* Effect.addFinalizer(() => Effect.sync(unmount));
       expect((yield* AtomRegistry.getResult(registry, list)).entries[0]?.title).toBe("Original");
@@ -180,6 +189,7 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
       stopPages();
       for (const manual of [false, true]) {
         title = manual ? "Manual" : "Pushed";
+        state = manual ? "open" : "closed";
         const expected = title;
         const changed = Latch.makeUnsafe();
         const stop = registry.subscribe(list, (result) => {
@@ -199,6 +209,7 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
         yield* changed.await;
         expect((yield* AtomRegistry.getResult(registry, list)).entries[0]?.title).toBe(expected);
         expect((yield* AtomRegistry.getResult(registry, detail)).body).toBe(`Body: ${expected}`);
+        expect((yield* AtomRegistry.getResult(registry, summary)).state).toBe(state);
         stop();
       }
     }),

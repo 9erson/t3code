@@ -79,6 +79,19 @@ const failure = (error: GitHubApi.GitHubApiError) =>
     cause: error,
   });
 
+const toIssue = (row: typeof Row.Type): ProviderIssue => ({
+  number: row.number,
+  title: row.title,
+  url: row.html_url,
+  author: row.user === null ? null : actor(row.user),
+  state: row.state,
+  labels: row.labels.map((label) => ({ name: label.name, color: label.color ?? null })),
+  assignees: row.assignees.map(actor),
+  commentCount: row.comments,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
 export const make = Effect.gen(function* () {
   const api = yield* GitHubApi.GitHubApi;
   const read = <S extends Schema.Top>(
@@ -256,6 +269,18 @@ export const make = Effect.gen(function* () {
           Cache.get(viewers, JSON.stringify([host, fingerprint])),
         ),
       ),
+    getIssueSummary: Effect.fn("GitHubIssueProvider.getIssueSummary")(function* (input) {
+      const repository = input.repository.split("/").map(encodeURIComponent).join("/");
+      const { value } = yield* read(
+        input.host,
+        `repos/${repository}/issues/${input.number}`,
+        Row,
+        "issueSummary",
+      );
+      if (value.pull_request !== undefined)
+        return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
+      return toIssue(value);
+    }),
     listIssues: Effect.fn("GitHubIssueProvider.listIssues")(function* (input) {
       // REST's issues endpoint also returns PRs. Follow its pages, filtering them before the
       // issue limit, so a page of PRs does not hide issues waiting on a subsequent page.
@@ -350,18 +375,7 @@ export const make = Effect.gen(function* () {
             )
               continue;
           }
-          items.push({
-            number: row.number,
-            title: row.title,
-            url: row.html_url,
-            author: row.user === null ? null : actor(row.user),
-            state: row.state,
-            labels: row.labels.map((label) => ({ name: label.name, color: label.color ?? null })),
-            assignees: row.assignees.map(actor),
-            commentCount: row.comments,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-          });
+          items.push(toIssue(row));
           if (items.length === input.limit)
             return {
               items,

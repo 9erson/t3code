@@ -142,6 +142,7 @@ export const IssueFailureReason = Schema.Literals([
   "provider-unsupported",
   "transient",
   "invalid-response",
+  "repository-unavailable",
   "not-found",
   "label-not-found",
   "invalid-query",
@@ -170,6 +171,8 @@ export class IssueOperationError extends Schema.TaggedError<IssueOperationError>
         return "This host cannot be browsed here yet.";
       case "label-not-found":
         return "One of the selected labels no longer exists in this repository. Reload labels and try again.";
+      case "repository-unavailable":
+        return `No configured GitHub project can read issues from ${this.host}. Add the repository as a project and retry.`;
       case "not-found":
         return "This issue could not be found, or this account cannot see it.";
       case "invalid-query":

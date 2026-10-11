@@ -202,6 +202,26 @@ export function createIssueEnvironmentAtoms<R, E>(
   });
   return {
     refreshes,
+    summary: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:issues:summary",
+      tag: WS_METHODS.issuesSummary,
+      staleTimeMs: 30_000,
+      refreshIntervalMs: 60_000,
+      refreshTrigger: ({ environmentId }) => refreshes({ environmentId, input: {} }),
+    }),
+    linkedThreads: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:issues:linkedThreads",
+      tag: WS_METHODS.issuesLinkedThreads,
+      staleTimeMs: 0,
+    }),
+    link: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:issues:link",
+      tag: WS_METHODS.issuesLink,
+    }),
+    unlink: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:issues:unlink",
+      tag: WS_METHODS.issuesUnlink,
+    }),
     list,
     detail,
     listPages: Atom.family((key: string) =>

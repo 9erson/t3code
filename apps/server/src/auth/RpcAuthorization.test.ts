@@ -501,3 +501,88 @@ it.effect.each([
       }),
     ),
 );
+describe("issue link authorization", () => {
+  const tested = [
+    WS_METHODS.issuesLink,
+    WS_METHODS.issuesUnlink,
+    WS_METHODS.issuesLinkedThreads,
+  ] as const;
+  const group = WsRpcGroup.omit(
+    ...[...WsRpcGroup.requests.keys()].filter(
+      (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, (typeof tested)[number]> =>
+        !(tested as readonly string[]).includes(tag),
+    ),
+  );
+  it.effect("read-only sessions can see linked threads but cannot attach or detach an issue", () =>
+    Effect.gen(function* () {
+      const writes: string[] = [];
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.issuesLink, () =>
+              Effect.sync(() => {
+                writes.push("link");
+              }),
+            ),
+            group.toLayerHandler(WS_METHODS.issuesUnlink, () =>
+              Effect.sync(() => {
+                writes.push("unlink");
+              }),
+            ),
+            group.toLayerHandler(WS_METHODS.issuesLinkedThreads, () =>
+              Effect.succeed({ threads: [] }),
+            ),
+            RpcAuthorization.layer([AuthOrchestrationReadScope, AuthOrchestrationOperateScope]),
+          ),
+        ),
+      );
+      const key = { host: "github.com", repository: "owner/repo", number: 5 };
+      expect(yield* client[WS_METHODS.issuesLinkedThreads](key)).toEqual({ threads: [] });
+      for (const tag of [WS_METHODS.issuesLink, WS_METHODS.issuesUnlink] as const) {
+        expect(
+          yield* client[tag]({ ...key, threadId: ThreadId.make("thread:permission") }).pipe(
+            Effect.flip,
+          ),
+        ).toMatchObject({
+          _tag: "EnvironmentAuthorizationError",
+          requiredPermission: AuthSourceControlWriteScope,
+        });
+      }
+      expect(writes).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+  it.effect("source control writers can attach and detach issues", () =>
+    Effect.gen(function* () {
+      const writes: string[] = [];
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.issuesLink, () =>
+              Effect.sync(() => {
+                writes.push("link");
+              }),
+            ),
+            group.toLayerHandler(WS_METHODS.issuesUnlink, () =>
+              Effect.sync(() => {
+                writes.push("unlink");
+              }),
+            ),
+            group.toLayerHandler(WS_METHODS.issuesLinkedThreads, () =>
+              Effect.succeed({ threads: [] }),
+            ),
+            RpcAuthorization.layer([AuthSourceControlWriteScope]),
+          ),
+        ),
+      );
+      const input = {
+        host: "github.com",
+        repository: "owner/repo",
+        number: 5,
+        threadId: ThreadId.make("thread:permission"),
+      };
+      yield* client[WS_METHODS.issuesLink](input);
+      yield* client[WS_METHODS.issuesUnlink](input);
+      expect(writes).toEqual(["link", "unlink"]);
+    }).pipe(Effect.scoped),
+  );
+});

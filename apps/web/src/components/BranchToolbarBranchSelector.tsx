@@ -1,3 +1,4 @@
+import { ThreadIssueChips } from "./issue/ThreadIssueChips";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
@@ -752,6 +753,11 @@ export function BranchToolbarBranchSelector({
             }}
           />
         ) : null}
+        <ThreadIssueChips
+          links={serverThread?.issues ?? []}
+          threadRef={threadRef}
+          refreshCurrentState
+        />
         <span
           className="flex min-w-0"
           onMouseDownCapture={(event) => {

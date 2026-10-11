@@ -520,6 +520,54 @@ it.effect.each(writes)("rejects an unreadable $method response", (method) =>
 );
 
 it.effect(
+  "reads a closed issue by number and refuses a PR from GitHub's shared issues endpoint",
+  () =>
+    Effect.gen(function* () {
+      let isPullRequest = false;
+      const provider = yield* GitHubIssueProvider.make.pipe(
+        Effect.provide(
+          Layer.succeed(
+            GitHubApi.GitHubApi,
+            GitHubApi.GitHubApi.of({
+              credential: () =>
+                Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+              graphql: () => Effect.die("REST only"),
+              rest: (input) => {
+                expect(input.path).toBe("repos/acme/web/issues/2");
+                return Effect.succeed({
+                  status: 200,
+                  headers: {},
+                  truncated: false,
+                  invalidUtf8: false,
+                  body: JSON.stringify({
+                    ...issue,
+                    state: "closed",
+                    ...(isPullRequest ? { pull_request: {} } : {}),
+                  }),
+                });
+              },
+            }),
+          ),
+        ),
+      );
+      expect(
+        yield* provider.getIssueSummary({
+          host: "github.com",
+          repository: "acme/web",
+          cwd: "/repo",
+          number: 2,
+        }),
+      ).toMatchObject({ number: 2, title: "A bug", state: "closed" });
+      isPullRequest = true;
+      expect(
+        yield* provider
+          .getIssueSummary({ host: "github.com", repository: "acme/web", cwd: "/repo", number: 2 })
+          .pipe(Effect.flip),
+      ).toMatchObject({ _tag: "IssueOperationError", reason: "invalid-response" });
+    }),
+);
+
+it.effect(
   "uses native qualifier search scoped to issues in the configured repository, honoring typed state and sorting",
   () =>
     Effect.gen(function* () {

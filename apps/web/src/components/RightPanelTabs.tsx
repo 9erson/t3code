@@ -142,6 +142,7 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
+  onAddIssues?: (() => void) | undefined;
   onAddDevice: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
@@ -149,6 +150,7 @@ interface RightPanelTabsProps {
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
+  issuesAvailable?: boolean | undefined;
   deviceAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   children: ReactNode;
@@ -340,6 +342,7 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
+  onAddIssues?: (() => void) | undefined;
   onAddDevice: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
@@ -347,6 +350,7 @@ function RightPanelEmptyState(props: {
   filesAvailable: boolean;
   pullRequestAvailable: boolean;
   pullRequestsAvailable: boolean;
+  issuesAvailable?: boolean | undefined;
   deviceAvailable: boolean;
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
@@ -392,6 +396,14 @@ function RightPanelEmptyState(props: {
       available: props.pullRequestAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.pullRequest,
       onClick: props.onAddPullRequest,
+    },
+    {
+      label: "Linked issues",
+      icon: PullRequestGlyph.link,
+      shortcut: "I",
+      available: props.issuesAvailable === true,
+      disabledReason: "This environment does not support issues.",
+      onClick: () => props.onAddIssues?.(),
     },
     {
       label: "Linked pull requests",
@@ -616,6 +628,8 @@ function surfaceTitle(
       );
     case "pull-request":
       return `#${surface.number}`;
+    case "issues":
+      return "Linked issues";
     case "pull-requests":
       return "Pull requests";
     case "device":
@@ -699,6 +713,7 @@ function SurfaceIcon({
           seed={pullRequestStatusSeeds?.[surface.id]}
         />
       );
+    case "issues":
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "device":
@@ -974,6 +989,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.pullRequestAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.pullRequest,
       onClick: props.onAddPullRequest,
+    },
+    {
+      label: "Linked issues",
+      icon: PullRequestGlyph.link,
+      shortcut: "I",
+      available: props.issuesAvailable === true,
+      disabledReason: "This environment does not support issues.",
+      onClick: () => props.onAddIssues?.(),
     },
     {
       label: "Linked pull requests",
@@ -1482,6 +1505,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
+            onAddIssues={props.onAddIssues}
             onAddDevice={props.onAddDevice}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
@@ -1489,6 +1513,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             filesAvailable={props.filesAvailable}
             pullRequestAvailable={props.pullRequestAvailable}
             pullRequestsAvailable={props.pullRequestsAvailable}
+            issuesAvailable={props.issuesAvailable}
             deviceAvailable={props.deviceAvailable}
           />
         ) : (

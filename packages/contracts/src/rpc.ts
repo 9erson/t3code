@@ -36,6 +36,8 @@ import {
   ChatGptHandoffState,
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
+import { IssueLinkInput, IssueLinkedThreadsResult, ThreadIssueKey } from "./threadIssue.ts";
+import { IssueListEntry } from "./issue.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
@@ -539,6 +541,10 @@ export const WS_METHODS = {
   issuesSetLabels: "issues.setLabels",
   issuesLabelCandidates: "issues.labelCandidates",
   issuesList: "issues.list",
+  issuesLink: "issues.link",
+  issuesUnlink: "issues.unlink",
+  issuesSummary: "issues.summary",
+  issuesLinkedThreads: "issues.linkedThreads",
   issuesDetail: "issues.detail",
   issuesInvalidate: "issues.invalidate",
   issuesSubscribeRefreshes: "issues.subscribeRefreshes",
@@ -975,6 +981,26 @@ const WsIssuesSetLabelsRpc = Rpc.make(WS_METHODS.issuesSetLabels, {
 const WsIssuesLabelCandidatesRpc = Rpc.make(WS_METHODS.issuesLabelCandidates, {
   payload: IssueLabelCandidatesInput,
   success: Schema.Array(IssueLabel),
+  error: IssueRpcError,
+});
+const WsIssuesLinkRpc = Rpc.make(WS_METHODS.issuesLink, {
+  payload: IssueLinkInput,
+  success: Schema.Void,
+  error: IssueRpcError,
+});
+const WsIssuesUnlinkRpc = Rpc.make(WS_METHODS.issuesUnlink, {
+  payload: IssueLinkInput,
+  success: Schema.Void,
+  error: IssueRpcError,
+});
+const WsIssuesSummaryRpc = Rpc.make(WS_METHODS.issuesSummary, {
+  payload: ThreadIssueKey,
+  success: IssueListEntry,
+  error: IssueRpcError,
+});
+const WsIssuesLinkedThreadsRpc = Rpc.make(WS_METHODS.issuesLinkedThreads, {
+  payload: ThreadIssueKey,
+  success: IssueLinkedThreadsResult,
   error: IssueRpcError,
 });
 const WsIssuesListRpc = Rpc.make(WS_METHODS.issuesList, {
@@ -1969,6 +1995,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsIssuesSetStateRpc,
   WsIssuesSetLabelsRpc,
   WsIssuesLabelCandidatesRpc,
+  WsIssuesLinkRpc,
+  WsIssuesUnlinkRpc,
+  WsIssuesSummaryRpc,
+  WsIssuesLinkedThreadsRpc,
   WsIssuesListRpc,
   WsIssuesDetailRpc,
   WsIssuesInvalidateRpc,

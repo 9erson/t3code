@@ -1,6 +1,7 @@
 import { type EnvironmentId } from "@t3tools/contracts";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
+import { ThreadIssueChips } from "./issue/ThreadIssueChips";
 import { setThreadChangeRequestSnapshot } from "./ThreadStatusIndicators";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import {
@@ -1845,6 +1846,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
             {prBadge}
+            <ThreadIssueChips
+              links={thread.issues ?? []}
+              threadRef={threadRef}
+              refreshCurrentState={props.isActive}
+              onOpen={() => {
+                if (!props.isActive) onThreadActivate(threadRef);
+              }}
+            />
             {sortable?.isDragging ? (
               dragDestination
             ) : (
@@ -2184,6 +2193,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               )}
               {terminalStatusIcon}
               {prBadge}
+              <ThreadIssueChips
+                links={thread.issues ?? []}
+                threadRef={threadRef}
+                refreshCurrentState={props.isActive}
+                onOpen={() => {
+                  if (!props.isActive) onThreadActivate(threadRef);
+                }}
+              />
               {diff ? (
                 <span className="shrink-0 font-mono">
                   <span className="text-diff-addition-foreground">+{diff.insertions}</span>{" "}

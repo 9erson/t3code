@@ -58,6 +58,7 @@ const provider: IssueProviderApi = {
   setLabels: () => Effect.die("No labels fixture"),
   labelCandidates: () => Effect.die("No labels fixture"),
   kind: "github",
+  getIssueSummary: () => Effect.die("Detail and list tests do not read summaries"),
   getIssue: (input) =>
     provider.listIssues({ ...input, state: "open", limit: 1 }).pipe(
       Effect.map((page) => ({
@@ -478,6 +479,40 @@ it.effect("state and label writes refresh cached rows and details from GitHub", 
       { name: "bug", color: "ff0000" },
     ]);
   }),
+);
+
+it.effect(
+  "refreshes a linked issue's current state after invalidation without depending on open-list membership",
+  () =>
+    Effect.gen(function* () {
+      let state: "open" | "closed" = "open";
+      const service = yield* make([project("healthy", "github.com")], {
+        ...provider,
+        getIssueSummary: () =>
+          Effect.succeed({
+            number: 5,
+            title: "Linked bug",
+            url: "https://github.com/acme/healthy/issues/5",
+            author: null,
+            labels: [],
+            assignees: [],
+            commentCount: 0,
+            state,
+            createdAt: "2026-07-01T00:00:00Z",
+            updatedAt: "2026-07-02T00:00:00Z",
+          }),
+      });
+      const key = { host: "GITHUB.COM", repository: "Acme/Healthy", number: 5 };
+      expect((yield* service.summary(key)).state).toBe("open");
+      state = "closed";
+      yield* service.invalidate();
+      expect(yield* service.summary(key)).toMatchObject({
+        host: "github.com",
+        repository: "acme/healthy",
+        number: 5,
+        state: "closed",
+      });
+    }),
 );
 
 it.effect(

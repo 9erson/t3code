@@ -1211,3 +1211,31 @@ describe("rightPanelStore", () => {
     expect(store.getUserActionRevision(refA)).toBe(revision);
   });
 });
+
+it("opens one linked-issues tab per thread and preserves the surface across persistence and reopening", () => {
+  const store = useRightPanelStore.getState();
+  store.open(refA, "issues");
+  store.open(refA, "issues");
+  expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+    id: "issues",
+    kind: "issues",
+  });
+  expect(
+    selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+  ).toHaveLength(1);
+  const restored = migratePersistedRightPanelState({
+    byThreadKey: useRightPanelStore.getState().byThreadKey,
+  });
+  expect(selectActiveRightPanelSurface(restored.byThreadKey, refA)).toEqual({
+    id: "issues",
+    kind: "issues",
+  });
+  store.closeSurface(refA, "issues");
+  expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toBeNull();
+  store.open(refA, "issues");
+  store.open(refB, "issues");
+  expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refB)).toEqual({
+    id: "issues",
+    kind: "issues",
+  });
+});
