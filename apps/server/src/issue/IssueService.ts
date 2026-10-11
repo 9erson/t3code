@@ -175,6 +175,7 @@ export const make = Effect.gen(function* () {
                 cwd: project.workspaceRoot,
                 repository,
                 state: input.state,
+                ...(input.involvement === undefined ? {} : { involvement: input.involvement }),
                 ...(input.query === undefined ? {} : { query: input.query }),
                 ...(input.filters === undefined ? {} : { filters: input.filters }),
                 ...(input.sort === undefined ? {} : { sort: input.sort }),

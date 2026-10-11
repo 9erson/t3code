@@ -31,15 +31,7 @@ import {
 
 const denied = Atom.make(false);
 
-export function CreateIssueControl(props: {
-  targets: ReadonlyArray<IssueCreationTarget>;
-  preferredKey?: string | undefined;
-  onCreated: (target: IssueCreationTarget, issue: IssueListEntry) => void;
-}) {
-  return <IssueComposer {...props} />;
-}
-
-function IssueComposer({
+export function CreateIssueControl({
   targets,
   preferredKey,
   onCreated,

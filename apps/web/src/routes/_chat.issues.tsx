@@ -100,6 +100,7 @@ function IssuesPage() {
   const targets = useMemo(() => {
     const input: IssueListInput = {
       state,
+      involvement: search.issueInvolvement,
       limit: 100,
       sort: search.issueSort,
       ...(sentQuery ? { query: sentQuery } : {}),
@@ -128,12 +129,35 @@ function IssuesPage() {
     search.projectId,
     search.host,
     search.issueSort,
+    search.issueInvolvement,
     search.author,
     search.labels,
     state,
     sentQuery,
   ]);
   const query = useIssueList(targets);
+  const refreshIssueList = query.refresh;
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshIssueList();
+    };
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const syncInterval = () => {
+      if (interval !== undefined) clearInterval(interval);
+      interval =
+        document.visibilityState === "visible"
+          ? setInterval(refreshWhenVisible, 60_000)
+          : undefined;
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", syncInterval);
+    syncInterval();
+    return () => {
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", syncInterval);
+      if (interval !== undefined) clearInterval(interval);
+    };
+  }, [refreshIssueList]);
   const groups = useMemo(
     () =>
       groupIssues(
@@ -385,6 +409,14 @@ function IssuesPage() {
                           href={entry.url}
                           target="_blank"
                           rel="noopener noreferrer"
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            void showPullRequestLinkContextMenu({
+                              url: entry.url,
+                              openLabel: "Open on GitHub",
+                              position: { x: event.clientX, y: event.clientY },
+                            });
+                          }}
                           aria-current={
                             selection?.environmentId === entry.environmentId &&
                             selection.projectId === entry.projectId &&
@@ -416,21 +448,8 @@ function IssuesPage() {
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{entry.title}</p>
                             <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                              {entry.host} · {entry.repository}{" "}
-                              <span
-                                onContextMenu={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  void showPullRequestLinkContextMenu({
-                                    url: entry.url,
-                                    openLabel: "Open on GitHub",
-                                    position: { x: event.clientX, y: event.clientY },
-                                  });
-                                }}
-                              >
-                                #{entry.number}
-                              </span>{" "}
-                              · {entry.author?.login ?? "Unknown author"}
+                              {entry.host} · {entry.repository} #{entry.number} ·{" "}
+                              {entry.author?.login ?? "Unknown author"}
                             </p>
                             {entry.labels.length > 0 ? (
                               <div className="mt-1 flex flex-wrap gap-1">

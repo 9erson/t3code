@@ -13,6 +13,7 @@ import type {
   IssueListEntry,
   IssueListState,
   IssueListSort,
+  IssueListInvolvement,
   IssueListFilters,
   IssueOperationError,
   SourceControlProviderKind,
@@ -66,6 +67,7 @@ export interface IssueProviderApi {
     readonly cwd: string;
     readonly repository: string;
     readonly state: IssueListState;
+    readonly involvement?: IssueListInvolvement;
     readonly limit: number;
     readonly query?: string;
     readonly filters?: IssueListFilters;

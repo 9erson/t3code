@@ -16,7 +16,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.issuesComment]: AuthSourceControlWriteScope,
   [WS_METHODS.issuesSetState]: AuthSourceControlWriteScope,
   [WS_METHODS.issuesSetLabels]: AuthSourceControlWriteScope,
-  [WS_METHODS.issuesLabelCandidates]: AuthSourceControlWriteScope,
+  [WS_METHODS.issuesLabelCandidates]: AuthOrchestrationReadScope,
   [WS_METHODS.issuesLink]: AuthSourceControlWriteScope,
   [WS_METHODS.issuesUnlink]: AuthSourceControlWriteScope,
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,

@@ -102,6 +102,8 @@ export const IssueDetail = Schema.Struct({
 export type IssueDetail = typeof IssueDetail.Type;
 export const IssueListSort = Schema.Literals(["updated", "newest", "oldest", "comments"]);
 export type IssueListSort = typeof IssueListSort.Type;
+export const IssueListInvolvement = Schema.Literals(["all", "assigned", "authored", "others"]);
+export type IssueListInvolvement = typeof IssueListInvolvement.Type;
 export const IssueListFilters = Schema.Struct({
   author: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(100))),
   labels: Schema.optional(
@@ -117,6 +119,7 @@ export const IssueListCursors = Schema.Record(
 );
 export const IssueListInput = Schema.Struct({
   state: IssueListState,
+  involvement: Schema.optional(IssueListInvolvement),
   query: Schema.optional(Schema.String.check(Schema.isMaxLength(256))),
   filters: Schema.optional(IssueListFilters),
   sort: Schema.optional(IssueListSort),

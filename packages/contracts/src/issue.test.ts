@@ -99,6 +99,8 @@ it("round-trips closed scope, qualifier search, filters and sorts while bounding
     cursors: { "github.com acme/web": "2:3" },
   };
   expect(decode(input)).toEqual(input);
+  expect(decode({ state: "open", involvement: "assigned" }).involvement).toBe("assigned");
+  expect(() => decode({ state: "open", involvement: "watching" })).toThrow();
   for (const invalid of [
     { query: "x".repeat(257) },
     { sort: "random" },

@@ -295,7 +295,6 @@ it.effect.each([
   WS_METHODS.issuesComment,
   WS_METHODS.issuesSetState,
   WS_METHODS.issuesSetLabels,
-  WS_METHODS.issuesLabelCandidates,
 ])("uses the destination source-control permission for %s availability and execution", (method) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -355,26 +354,28 @@ it.effect("issue link and unlink commands require the destination source control
   ),
 );
 
-it.effect("allows repository assignee candidates with the destination read grant", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const registry = yield* setup;
-      const candidates = createCommandPermissions(runtime, WS_METHODS.issuesAssigneeCandidates);
-      registry.set(
-        sessions(env),
-        AsyncResult.success({
-          ...grant(false),
-          scopes: [AuthOrchestrationReadScope],
-          permissions: [AuthOrchestrationReadScope],
-        }),
-      );
-      expect(registry.get(candidates.permissionAtom(env))).toBe(true);
-      yield* candidates.authorize(registry, env);
-      registry.set(sessions(other), AsyncResult.success(grant(false)));
-      expect(registry.get(candidates.permissionAtom(other))).toBe(false);
-      expect(yield* candidates.authorize(registry, other).pipe(Effect.flip)).toMatchObject({
-        requiredPermission: AuthOrchestrationReadScope,
-      });
-    }),
-  ),
+it.effect.each([WS_METHODS.issuesAssigneeCandidates, WS_METHODS.issuesLabelCandidates])(
+  "allows repository candidates with the destination read grant for %s",
+  (method) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const candidates = createCommandPermissions(runtime, method);
+        registry.set(
+          sessions(env),
+          AsyncResult.success({
+            ...grant(false),
+            scopes: [AuthOrchestrationReadScope],
+            permissions: [AuthOrchestrationReadScope],
+          }),
+        );
+        expect(registry.get(candidates.permissionAtom(env))).toBe(true);
+        yield* candidates.authorize(registry, env);
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect(registry.get(candidates.permissionAtom(other))).toBe(false);
+        expect(yield* candidates.authorize(registry, other).pipe(Effect.flip)).toMatchObject({
+          requiredPermission: AuthOrchestrationReadScope,
+        });
+      }),
+    ),
 );

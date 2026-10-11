@@ -94,7 +94,7 @@ const toIssue = (row: typeof Row.Type): ProviderIssue => ({
 
 export const make = Effect.gen(function* () {
   const api = yield* GitHubApi.GitHubApi;
-  const read = <S extends Schema.Top>(
+  const requestDecoded = <S extends Schema.Top>(
     host: string,
     path: string,
     schema: S,
@@ -143,7 +143,7 @@ export const make = Effect.gen(function* () {
   const viewers = yield* Cache.makeWith(
     (key: string) => {
       const [host] = JSON.parse(key) as [string, string];
-      return read(host, "user", Actor).pipe(Effect.map(({ value }) => value.login));
+      return requestDecoded(host, "user", Actor).pipe(Effect.map(({ value }) => value.login));
     },
     {
       capacity: 32,
@@ -181,10 +181,16 @@ export const make = Effect.gen(function* () {
         }
       }
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
-      const { value } = yield* read(input.host, `repos/${repository}/issues`, Row, "issueCreate", {
-        method: "POST",
-        body: { title: input.title, body: input.body, labels, assignees },
-      });
+      const { value } = yield* requestDecoded(
+        input.host,
+        `repos/${repository}/issues`,
+        Row,
+        "issueCreate",
+        {
+          method: "POST",
+          body: { title: input.title, body: input.body, labels, assignees },
+        },
+      );
       if (value.pull_request !== undefined)
         return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
       return toIssue(value);
@@ -193,7 +199,7 @@ export const make = Effect.gen(function* () {
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
       const candidates: Array<ReturnType<typeof actor>> = [];
       for (let page = 1; page <= 10; page += 1) {
-        const { value, headers } = yield* read(
+        const { value, headers } = yield* requestDecoded(
           input.host,
           `repos/${repository}/assignees?per_page=100&page=${page}`,
           Schema.Array(Actor),
@@ -208,7 +214,7 @@ export const make = Effect.gen(function* () {
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
       const labels: Array<ReturnType<typeof label>> = [];
       for (let page = 1; page <= 10; page += 1) {
-        const { value, headers } = yield* read(
+        const { value, headers } = yield* requestDecoded(
           input.host,
           `repos/${repository}/labels?per_page=100&page=${page}`,
           Schema.Array(Label),
@@ -231,7 +237,7 @@ export const make = Effect.gen(function* () {
         if (!labels.includes(existing.name)) labels.push(existing.name);
       }
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
-      const { value } = yield* read(
+      const { value } = yield* requestDecoded(
         input.host,
         `repos/${repository}/issues/${input.number}/labels`,
         Schema.Array(Label),
@@ -242,7 +248,7 @@ export const make = Effect.gen(function* () {
     }),
     setState: Effect.fn("GitHubIssueProvider.setState")(function* (input) {
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
-      const { value } = yield* read(
+      const { value } = yield* requestDecoded(
         input.host,
         `repos/${repository}/issues/${input.number}`,
         Row,
@@ -258,7 +264,7 @@ export const make = Effect.gen(function* () {
     }),
     comment: Effect.fn("GitHubIssueProvider.comment")(function* (input) {
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
-      const { value } = yield* read(
+      const { value } = yield* requestDecoded(
         input.host,
         `repos/${repository}/issues/${input.number}/comments`,
         Comment,
@@ -280,14 +286,14 @@ export const make = Effect.gen(function* () {
     getIssue: Effect.fn("GitHubIssueProvider.getIssue")(function* (input) {
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
       const path = `repos/${repository}/issues/${input.number}`;
-      const { value: row } = yield* read(input.host, path, DetailRow, "issueDetail");
+      const { value: row } = yield* requestDecoded(input.host, path, DetailRow, "issueDetail");
       if (row.pull_request !== undefined)
         return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
       const comments: Array<ProviderIssueDetail["comments"][number]> = [];
       let more = false;
       // Keep the read bounded; never present a partial timeline as complete.
       for (let page = 1; page <= 10; page += 1) {
-        const { value, headers } = yield* read(
+        const { value, headers } = yield* requestDecoded(
           input.host,
           `${path}/comments?per_page=100&page=${page}`,
           Schema.Array(Comment),
@@ -331,7 +337,7 @@ export const make = Effect.gen(function* () {
       ),
     getIssueSummary: Effect.fn("GitHubIssueProvider.getIssueSummary")(function* (input) {
       const repository = input.repository.split("/").map(encodeURIComponent).join("/");
-      const { value } = yield* read(
+      const { value } = yield* requestDecoded(
         input.host,
         `repos/${repository}/issues/${input.number}`,
         Row,
@@ -344,7 +350,9 @@ export const make = Effect.gen(function* () {
     listIssues: Effect.fn("GitHubIssueProvider.listIssues")(function* (input) {
       // REST's issues endpoint also returns PRs. Follow its pages, filtering them before the
       // issue limit, so a page of PRs does not hide issues waiting on a subsequent page.
-      const search = (input.query?.trim().length ?? 0) > 0;
+      const search =
+        (input.query?.trim().length ?? 0) > 0 ||
+        (input.involvement !== undefined && input.involvement !== "all");
       const sort = input.sort ?? "updated";
       const githubSort = sort === "newest" || sort === "oldest" ? "created" : sort;
       const direction = sort === "oldest" ? "asc" : "desc";
@@ -354,6 +362,9 @@ export const make = Effect.gen(function* () {
         "is:issue",
         ...(parsed.state !== undefined || input.state === "all" ? [] : [`is:${input.state}`]),
         input.query?.trim() ?? "",
+        ...(input.involvement === "assigned" ? ["assignee:@me"] : []),
+        ...(input.involvement === "authored" ? ["author:@me"] : []),
+        ...(input.involvement === "others" ? ["-assignee:@me", "-author:@me"] : []),
         ...(input.filters?.author ? [`author:${input.filters.author}`] : []),
         ...(input.filters?.labels ?? []).map((label) => `label:${JSON.stringify(label)}`),
       ]
@@ -389,7 +400,7 @@ export const make = Effect.gen(function* () {
           params.set("q", query);
           params.set("sort", githubSort);
           params.set("order", direction);
-          const response = yield* read(
+          const response = yield* requestDecoded(
             input.host,
             `search/issues?${params}`,
             Schema.Struct({
@@ -409,7 +420,7 @@ export const make = Effect.gen(function* () {
           params.set("direction", direction);
           if (input.filters?.author) params.set("creator", input.filters.author);
           if (input.filters?.labels?.length) params.set("labels", input.filters.labels.join(","));
-          const response = yield* read(
+          const response = yield* requestDecoded(
             input.host,
             `repos/${repository}/issues?${params}`,
             Schema.Array(Row),

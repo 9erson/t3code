@@ -71,6 +71,46 @@ it.effect("lists issues with labels, assignees and counts while excluding pull r
   }).pipe(Effect.provide(transport)),
 );
 
+it.effect("uses GitHub involvement qualifiers before paginating issue results", () =>
+  Effect.gen(function* () {
+    const requested: URL[] = [];
+    const provider = yield* GitHubIssueProvider.make.pipe(
+      Effect.provideService(GitHubApi.GitHubApi, {
+        credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+        graphql: () => Effect.die("REST only"),
+        rest: (input) => {
+          requested.push(new URL(`https://api.github.com/${input.path}`));
+          return Effect.succeed({
+            status: 200,
+            headers: {},
+            truncated: false,
+            invalidUtf8: false,
+            body: JSON.stringify({ total_count: 0, incomplete_results: false, items: [] }),
+          });
+        },
+      }),
+    );
+    for (const [involvement, qualifiers] of [
+      ["assigned", ["assignee:@me"]],
+      ["authored", ["author:@me"]],
+      ["others", ["-assignee:@me", "-author:@me"]],
+    ] as const) {
+      yield* provider.listIssues({
+        host: "github.com",
+        repository: "acme/web",
+        cwd: "/repo",
+        state: "open",
+        involvement,
+        limit: 10,
+      });
+      expect(requested.at(-1)?.pathname).toBe("/search/issues");
+      expect(requested.at(-1)?.searchParams.get("q")).toBe(
+        ["repo:acme/web", "is:issue", "is:open", ...qualifiers].join(" "),
+      );
+    }
+  }),
+);
+
 it.effect("continues without skipping issues when REST pages contain pull requests", () =>
   Effect.gen(function* () {
     const api = GitHubApi.GitHubApi.of({
