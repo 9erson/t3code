@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProjectId, WS_METHODS } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, IssueOperationError, WS_METHODS } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Latch from "effect/Latch";
@@ -18,7 +18,7 @@ import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
-import { createIssueEnvironmentAtoms } from "./issues.ts";
+import { createIssueEnvironmentAtoms, mergeIssueListPages, issueListNextPage } from "./issues.ts";
 
 it.effect("revalidates mounted issues on a server push and after manual invalidation", () =>
   Effect.scoped(
@@ -26,15 +26,37 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
       const revision = yield* SubscriptionRef.make(0);
       let title = "Original";
       const client = {
-        [WS_METHODS.issuesList]: () =>
-          Effect.sync(() => ({
-            viewers: {},
-            providers: [],
-            errors: [],
-            nextCursors: {},
-            truncated: false,
-            entries: [{ title }],
-          })),
+        [WS_METHODS.issuesList]: (input: { cursors?: Record<string, string>; host?: string }) =>
+          input.host === "broken"
+            ? Effect.fail(
+                new IssueOperationError({ host: "broken", reason: "credentials-missing" }),
+              )
+            : Effect.sync(() => ({
+                viewers: {},
+                providers: [],
+                errors: [],
+                nextCursors: {},
+                truncated: false,
+                entries: [
+                  {
+                    title,
+                    number: input.cursors ? 2 : 1,
+                    provider: "github",
+                    host: "github.com",
+                    repository: "acme/web",
+                    projectId: ProjectId.make("p"),
+                    projectTitle: "Web",
+                    url: "https://github.com/acme/web/issues/1",
+                    author: null,
+                    state: "open",
+                    labels: [],
+                    assignees: [],
+                    commentCount: 0,
+                    createdAt: "2026-07-01T00:00:00Z",
+                    updatedAt: "2026-07-01T00:00:00Z",
+                  },
+                ],
+              })),
         [WS_METHODS.issuesDetail]: () =>
           Effect.sync(() => ({ title, body: `Body: ${title}`, comments: [] })),
         [WS_METHODS.issuesSubscribeRefreshes]: () => SubscriptionRef.changes(revision),
@@ -104,6 +126,30 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
       const unmount = registry.mount(list);
       yield* Effect.addFinalizer(() => Effect.sync(unmount));
       expect((yield* AtomRegistry.getResult(registry, list)).entries[0]?.title).toBe("Original");
+      const continuation = {
+        environmentId: target.environmentId,
+        input: { state: "open" as const, cursors: { "github.com acme/web": "2:0" } },
+      };
+      const broken = {
+        environmentId: EnvironmentId.make("broken"),
+        input: { state: "open" as const, host: "broken" },
+      };
+      const pages = atoms.listPages(
+        JSON.stringify([
+          { environmentId: target.environmentId, input: { state: "open" } },
+          continuation,
+          broken,
+        ]),
+      );
+      const stopPages = registry.mount(pages);
+      yield* Effect.addFinalizer(() => Effect.sync(stopPages));
+      yield* AtomRegistry.getResult(registry, atoms.list(continuation));
+      yield* AtomRegistry.getResult(registry, atoms.list(broken)).pipe(Effect.result);
+      const merged = registry.get(pages);
+      expect(merged.values[0]?.[1].entries.map((entry) => entry.number)).toEqual([1, 2]);
+      expect(merged.errors).toHaveLength(1);
+      expect(merged.isPending).toBe(false);
+      stopPages();
       for (const manual of [false, true]) {
         title = manual ? "Manual" : "Pushed";
         const expected = title;
@@ -130,3 +176,77 @@ it.effect("revalidates mounted issues on a server push and after manual invalida
     }),
   ),
 );
+
+it("appends issue pages without duplicates, keeps exhausted repository rows, and uses the newest observation", () => {
+  const row = (number: number, title: string, observedAt: number) => ({
+    provider: "github" as const,
+    host: "github.com",
+    repository: "acme/web",
+    projectId: ProjectId.make("p"),
+    projectTitle: "Web",
+    number,
+    title,
+    url: `https://github.com/acme/web/issues/${number}`,
+    author: null,
+    state: "open" as const,
+    labels: [],
+    assignees: [],
+    commentCount: 0,
+    createdAt: "2026-07-01T00:00:00Z",
+    updatedAt: "2026-07-01T00:00:00Z",
+    observedAt,
+  });
+  const first = {
+    viewers: { "github.com": "alice" },
+    providers: [],
+    errors: [],
+    truncated: true,
+    nextCursors: { "github.com acme/web": "2:0" },
+    entries: [row(1, "First", 1), row(2, "Before", 1)],
+  };
+  const second = {
+    ...first,
+    entries: [row(2, "After", 2), row(3, "Third", 2)],
+    truncated: false,
+    nextCursors: {},
+  };
+  const merged = mergeIssueListPages(first, second);
+  expect(merged.entries.map((entry) => [entry.number, entry.title])).toEqual([
+    [1, "First"],
+    [2, "After"],
+    [3, "Third"],
+  ]);
+  expect(merged.nextCursors).toEqual({});
+  expect(merged.truncated).toBe(false);
+});
+
+it("continues only unfinished environments with bounded per-read limits and stops after ten pages", () => {
+  const targets = ["first", "exhausted"].map((id) => ({
+    environmentId: EnvironmentId.make(id),
+    input: { state: "open" as const, limit: 100 },
+  }));
+  const result = {
+    viewers: {},
+    providers: [],
+    errors: [],
+    entries: [],
+    truncated: true,
+    nextCursors: { "github.com acme/web": "2:7" },
+  };
+  expect(
+    issueListNextPage(
+      targets,
+      [
+        [targets[0]!.environmentId, result],
+        [targets[1]!.environmentId, { ...result, truncated: false, nextCursors: {} }],
+      ],
+      1,
+    ),
+  ).toEqual([
+    {
+      environmentId: "first",
+      input: { state: "open", limit: 100, cursors: { "github.com acme/web": "2:7" } },
+    },
+  ]);
+  expect(issueListNextPage(targets, [[targets[0]!.environmentId, result]], 10)).toEqual([]);
+});

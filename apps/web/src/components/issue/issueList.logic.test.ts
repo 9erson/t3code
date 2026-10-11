@@ -5,7 +5,7 @@ import {
   type IssueListEntry,
   type IssueListResult,
 } from "@t3tools/contracts";
-import { groupIssues, mergeIssueLists } from "./issueList.logic";
+import { groupIssues, mergeIssueLists, filterIssues } from "./issueList.logic";
 const entry = (
   number: number,
   author: string,
@@ -73,4 +73,59 @@ it("keeps each environment's viewer identity while merging healthy rows and erro
   ]);
   expect(groupIssues(merged.entries)[1]?.entries.map((row) => row.number)).toEqual([2, 1]);
   expect(merged.errors[0]).toMatchObject({ environmentId: "second", message: "Sign in to GitHub" });
+});
+
+it("filters by state, labels, author, project, host and involvement without moving rows between groups", () => {
+  const base = {
+    ...entry(1, "Alice", ["me"], "2026-07-01T00:00:00Z"),
+    environmentId: EnvironmentId.make("env"),
+    viewer: "me",
+    labels: [{ name: "Bug", color: null }],
+  };
+  const rows = [
+    base,
+    { ...base, number: 2, state: "closed" as const },
+    { ...base, number: 3, host: "ghe.example" },
+    { ...base, number: 4, labels: [] },
+    { ...base, number: 5, author: { login: "bob", name: null, avatarUrl: null } },
+    { ...base, number: 6, projectId: ProjectId.make("other") },
+  ];
+  expect(
+    filterIssues(rows, {
+      state: "open",
+      host: "GitHub.com",
+      author: "alice",
+      labels: ["bug"],
+      projectId: ProjectId.make("p"),
+      involvement: "assigned",
+    }).map((row) => row.number),
+  ).toEqual([1]);
+  expect(filterIssues(rows, { state: "all", involvement: "authored" })).toEqual([]);
+});
+
+it("orders each involvement group by updated, newest, oldest or most commented with stable ties", () => {
+  const rows = [
+    {
+      ...entry(1, "me", [], "2026-07-04T00:00:00Z"),
+      createdAt: "2026-07-01T00:00:00Z",
+      commentCount: 2,
+    },
+    {
+      ...entry(2, "me", [], "2026-07-02T00:00:00Z"),
+      createdAt: "2026-07-03T00:00:00Z",
+      commentCount: 9,
+    },
+    {
+      ...entry(3, "me", [], "2026-07-03T00:00:00Z"),
+      createdAt: "2026-07-02T00:00:00Z",
+      commentCount: 5,
+    },
+  ].map((row) => ({ ...row, environmentId: EnvironmentId.make("env"), viewer: "me" }));
+  for (const [sort, expected] of [
+    ["updated", [1, 3, 2]],
+    ["newest", [2, 3, 1]],
+    ["oldest", [1, 3, 2]],
+    ["comments", [2, 3, 1]],
+  ] as const)
+    expect(groupIssues(rows, sort)[1]?.entries.map((row) => row.number)).toEqual(expected);
 });

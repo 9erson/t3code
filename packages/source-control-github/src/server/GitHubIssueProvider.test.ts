@@ -271,3 +271,198 @@ it.effect("refuses pull requests on the issue detail path", () =>
     ).toMatchObject({ _tag: "Failure", failure: { reason: "invalid-response" } });
   }),
 );
+
+it.effect(
+  "uses native qualifier search scoped to issues in the configured repository, honoring typed state and sorting",
+  () =>
+    Effect.gen(function* () {
+      let requested: URL | undefined;
+      const provider = yield* GitHubIssueProvider.make.pipe(
+        Effect.provideService(GitHubApi.GitHubApi, {
+          credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+          graphql: () => Effect.die("REST only"),
+          rest: (input) => {
+            requested = new URL(`https://api.github.com/${input.path}`);
+            return Effect.succeed({
+              status: 200,
+              headers: {},
+              truncated: false,
+              invalidUtf8: false,
+              body: JSON.stringify({
+                total_count: 1,
+                incomplete_results: false,
+                items: [{ ...issue, state: "closed" }],
+              }),
+            });
+          },
+        }),
+      );
+      const result = yield* provider.listIssues({
+        host: "github.com",
+        repository: "acme/web",
+        cwd: "/repo",
+        state: "open",
+        limit: 1,
+        query: 'label:"bug" author:octocat is:closed',
+        sort: "comments",
+        filters: { labels: ["triage"] },
+      });
+      expect(result.items.map((row) => [row.number, row.state])).toEqual([[2, "closed"]]);
+      expect(requested?.pathname).toBe("/search/issues");
+      expect(requested?.searchParams.get("q")).toBe(
+        'repo:acme/web is:issue label:"bug" author:octocat is:closed label:"triage"',
+      );
+      expect(requested?.searchParams.get("sort")).toBe("comments");
+      expect(requested?.searchParams.get("order")).toBe("desc");
+      expect(result.nextCursor).toBeNull();
+    }),
+);
+
+it.effect(
+  "continues native search within fixed-size pages without skipping rows and stops at GitHub's search bound",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* GitHubIssueProvider.make.pipe(
+        Effect.provideService(GitHubApi.GitHubApi, {
+          credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+          graphql: () => Effect.die("REST only"),
+          rest: (input) => {
+            const page = Number(
+              new URL(`https://api.github.com/${input.path}`).searchParams.get("page"),
+            );
+            return Effect.succeed({
+              status: 200,
+              headers: {},
+              truncated: false,
+              invalidUtf8: false,
+              body: JSON.stringify({
+                total_count: 2000,
+                incomplete_results: false,
+                items: Array.from({ length: 100 }, (_, index) => {
+                  const number = (page - 1) * 100 + index + 1;
+                  return {
+                    ...issue,
+                    number,
+                    html_url: `https://github.com/acme/web/issues/${number}`,
+                  };
+                }),
+              }),
+            });
+          },
+        }),
+      );
+      const input = {
+        host: "github.com",
+        cwd: "/repo",
+        repository: "acme/web",
+        state: "all" as const,
+        limit: 3,
+        query: "label:bug",
+      };
+      const first = yield* provider.listIssues(input);
+      const second = yield* provider.listIssues({ ...input, cursor: first.nextCursor! });
+      expect([...first.items, ...second.items].map((row) => row.number)).toEqual([
+        1, 2, 3, 4, 5, 6,
+      ]);
+      const last = yield* provider.listIssues({ ...input, cursor: "10:98" });
+      expect(last.items.map((row) => row.number)).toEqual([999, 1000]);
+      expect(last.nextCursor).toBeNull();
+      expect(
+        (yield* provider.listIssues({ ...input, cursor: "11:0" }).pipe(Effect.result))._tag,
+      ).toBe("Failure");
+    }),
+);
+
+it.effect(
+  "maps search quota refusals and malformed qualifiers into actionable typed failures",
+  () =>
+    Effect.gen(function* () {
+      for (const [error, expected] of [
+        [
+          new GitHubApi.GitHubApiRateLimitError({
+            host: "github.com",
+            operation: "searchIssues",
+            retryAt: 1234,
+          }),
+          { reason: "rate-limited", rateLimitResource: "search", retryAt: 1234 },
+        ],
+        [
+          new GitHubApi.GitHubApiResponseError({
+            host: "github.com",
+            operation: "searchIssues",
+            status: 422,
+          }),
+          { reason: "invalid-query" },
+        ],
+      ] as const) {
+        const provider = yield* GitHubIssueProvider.make.pipe(
+          Effect.provideService(GitHubApi.GitHubApi, {
+            credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+            graphql: () => Effect.die("REST only"),
+            rest: () => Effect.fail(error),
+          }),
+        );
+        const failure = yield* Effect.flip(
+          provider.listIssues({
+            host: "github.com",
+            repository: "acme/web",
+            cwd: "/repo",
+            state: "open",
+            limit: 10,
+            query: "label:bug",
+          }),
+        );
+        expect(failure).toMatchObject({ _tag: "IssueOperationError", ...expected });
+      }
+    }),
+);
+
+it.effect(
+  "uses closed REST issue filters and the host's sort order before applying the page limit",
+  () =>
+    Effect.gen(function* () {
+      for (const [sort, direction, githubSort] of [
+        ["updated", "desc", "updated"],
+        ["newest", "desc", "created"],
+        ["oldest", "asc", "created"],
+        ["comments", "desc", "comments"],
+      ] as const) {
+        let requested: URL | undefined;
+        const provider = yield* GitHubIssueProvider.make.pipe(
+          Effect.provideService(GitHubApi.GitHubApi, {
+            credential: () => Effect.succeed({ token: Redacted.make("fake"), fingerprint: "fake" }),
+            graphql: () => Effect.die("REST only"),
+            rest: (input) => {
+              requested = new URL(`https://api.github.com/${input.path}`);
+              return Effect.succeed({
+                status: 200,
+                headers: {},
+                truncated: false,
+                invalidUtf8: false,
+                body: JSON.stringify([{ ...issue, state: "closed" }]),
+              });
+            },
+          }),
+        );
+        const result = yield* provider.listIssues({
+          host: "github.com",
+          repository: "acme/web",
+          cwd: "/repo",
+          state: "closed",
+          limit: 1,
+          sort,
+          filters: { author: "octocat", labels: ["bug", "help wanted"] },
+        });
+        expect(result.items[0]?.state).toBe("closed");
+        expect(Object.fromEntries(requested!.searchParams)).toEqual({
+          state: "closed",
+          creator: "octocat",
+          labels: "bug,help wanted",
+          sort: githubSort,
+          direction,
+          per_page: "100",
+          page: "1",
+        });
+      }
+    }),
+);

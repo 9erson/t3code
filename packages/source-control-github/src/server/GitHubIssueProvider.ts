@@ -10,6 +10,7 @@ import type {
   ProviderIssue,
   ProviderIssueDetail,
 } from "@t3tools/source-control-core/server/IssueProvider";
+import { parseIssueSearch } from "@t3tools/shared/issueSearch";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as Exit from "effect/Exit";
@@ -80,9 +81,24 @@ export const make = Effect.gen(function* () {
     path: string,
     schema: S,
     operation = "listIssues",
-  ) =>
-    api.rest({ host, path, operation }).pipe(
-      Effect.mapError(failure),
+  ) => {
+    const search = path.startsWith("search/");
+    return api.rest({ host, path, operation: search ? "searchIssues" : operation }).pipe(
+      Effect.mapError((error) => {
+        const mapped = failure(error);
+        return new IssueOperationError({
+          host,
+          reason:
+            search && error._tag === "GitHubApiResponseError" && error.status === 422
+              ? "invalid-query"
+              : mapped.reason,
+          ...(mapped.retryAt === undefined ? {} : { retryAt: mapped.retryAt }),
+          ...(mapped.reason === "rate-limited"
+            ? { rateLimitResource: search ? ("search" as const) : ("core" as const) }
+            : {}),
+          cause: error,
+        });
+      }),
       Effect.flatMap((response) =>
         response.truncated || response.invalidUtf8
           ? Effect.fail(new IssueOperationError({ host, reason: "invalid-response" }))
@@ -94,6 +110,7 @@ export const make = Effect.gen(function* () {
             ),
       ),
     );
+  };
   const viewers = yield* Cache.makeWith(
     (key: string) => {
       const [host] = JSON.parse(key) as [string, string];
@@ -161,6 +178,23 @@ export const make = Effect.gen(function* () {
     listIssues: Effect.fn("GitHubIssueProvider.listIssues")(function* (input) {
       // REST's issues endpoint also returns PRs. Follow its pages, filtering them before the
       // issue limit, so a page of PRs does not hide issues waiting on a subsequent page.
+      const search = (input.query?.trim().length ?? 0) > 0;
+      const sort = input.sort ?? "updated";
+      const githubSort = sort === "newest" || sort === "oldest" ? "created" : sort;
+      const direction = sort === "oldest" ? "asc" : "desc";
+      const parsed = parseIssueSearch(input.query ?? "");
+      const query = [
+        `repo:${input.repository}`,
+        "is:issue",
+        ...(parsed.state !== undefined || input.state === "all" ? [] : [`is:${input.state}`]),
+        input.query?.trim() ?? "",
+        ...(input.filters?.author ? [`author:${input.filters.author}`] : []),
+        ...(input.filters?.labels ?? []).map((label) => `label:${JSON.stringify(label)}`),
+      ]
+        .filter(Boolean)
+        .join(" ");
+      if (input.cursor !== undefined && !/^\d+:\d+$/.test(input.cursor))
+        return yield* new IssueOperationError({ host: input.host, reason: "invalid-response" });
       const cursor = input.cursor === undefined ? [1, 0] : input.cursor.split(":").map(Number);
       let page = cursor[0] ?? 0;
       let offset = cursor[1] ?? 0;
@@ -168,7 +202,7 @@ export const make = Effect.gen(function* () {
         cursor.length !== 2 ||
         !Number.isSafeInteger(page) ||
         page < 1 ||
-        page > 100_000 ||
+        page > (search ? 10 : 100_000) ||
         !Number.isSafeInteger(offset) ||
         offset < 0 ||
         offset >= 100
@@ -182,15 +216,59 @@ export const make = Effect.gen(function* () {
       while (items.length < input.limit && pagesRead < 10) {
         pagesRead += 1;
         const perPage = 100;
-        const { value, headers } = yield* read(
-          input.host,
-          `repos/${repository}/issues?state=${input.state}&sort=updated&direction=desc&per_page=${perPage}&page=${page}`,
-          Schema.Array(Row),
-        );
-        const more = /rel="next"/.test(headers.link ?? "");
+        const params = new URLSearchParams({ per_page: String(perPage), page: String(page) });
+        let value: ReadonlyArray<typeof Row.Type>;
+        let more: boolean;
+        if (search) {
+          params.set("q", query);
+          params.set("sort", githubSort);
+          params.set("order", direction);
+          const response = yield* read(
+            input.host,
+            `search/issues?${params}`,
+            Schema.Struct({
+              total_count: NonNegativeInt,
+              incomplete_results: Schema.Boolean,
+              items: Schema.Array(Row),
+            }),
+          );
+          if (response.value.incomplete_results)
+            return yield* new IssueOperationError({ host: input.host, reason: "invalid-query" });
+          value = response.value.items;
+          // GitHub search exposes at most 1,000 results. Do not issue an invalid page 11.
+          more = page < 10 && page * perPage < Math.min(response.value.total_count, 1000);
+        } else {
+          params.set("state", input.state);
+          params.set("sort", githubSort);
+          params.set("direction", direction);
+          if (input.filters?.author) params.set("creator", input.filters.author);
+          if (input.filters?.labels?.length) params.set("labels", input.filters.labels.join(","));
+          const response = yield* read(
+            input.host,
+            `repos/${repository}/issues?${params}`,
+            Schema.Array(Row),
+          );
+          value = response.value;
+          more = /rel="next"/.test(response.headers.link ?? "");
+        }
         for (let index = offset; index < value.length; index += 1) {
           const row = value[index]!;
           if (row.pull_request !== undefined) continue;
+          // A caller's repo qualifiers must never expand the configured repository scope.
+          if (search) {
+            const url = URL.parse(row.html_url);
+            if (url === null)
+              return yield* new IssueOperationError({
+                host: input.host,
+                reason: "invalid-response",
+              });
+            if (
+              url.host.toLowerCase() !== input.host.toLowerCase() ||
+              url.pathname.toLowerCase() !==
+                `/${input.repository}/issues/${row.number}`.toLowerCase()
+            )
+              continue;
+          }
           items.push({
             number: row.number,
             title: row.title,

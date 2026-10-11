@@ -21,6 +21,7 @@ import {
   type IssueLinkTarget,
 } from "./issueLink.logic";
 import { issueSelectionSearch } from "./issueSelection.logic";
+import { validateIssueListSearch } from "./issueListPreferences";
 
 /** Read on hover or activation, using the same detail cache as the Issues page. */
 export function IssueLinkPreview({
@@ -69,7 +70,10 @@ export function IssueLinkPreview({
           }
           await navigate({
             to: "/issues",
-            search: { state: "all", ...issueSelectionSearch(selection) },
+            search: {
+              ...validateIssueListSearch({ state: "all" }),
+              ...issueSelectionSearch(selection),
+            },
           });
         })
         .catch((error: unknown) => {
